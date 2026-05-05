@@ -1,0 +1,9 @@
+[build]
+# Allow all targets to share the workspace target dir.
+
+[net]
+# Use git-cli auth on Windows so https remotes work without separate cargo creds.
+git-fetch-with-cli = true
+
+[term]
+verbose = false

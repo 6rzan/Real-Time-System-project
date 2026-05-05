@@ -1,0 +1,34 @@
+[package]
+name = "rts-cli"
+description = "CLI entry point for the RTS2601 pipeline (run-async, run-threaded, replay, bench, analyse)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "rts"
+path = "src/main.rs"
+
+[dependencies]
+rts-core = { workspace = true }
+rts-async = { workspace = true }
+rts-threaded = { workspace = true }
+rts-replay = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time"] }
+clap = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+dhat = { workspace = true, optional = true }
+
+[features]
+default = []
+# Swap the global allocator for dhat's heap-profiling allocator. Use with the
+# `owned-baseline` feature to compare zero-copy vs. allocating parsers.
+dhat-heap = ["dep:dhat"]
+# Forces rts-core to take the deliberately-allocating parse path.
+owned-baseline = ["rts-core/owned-baseline"]

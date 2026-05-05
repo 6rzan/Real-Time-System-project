@@ -1,0 +1,22 @@
+[package]
+name = "rts-threaded"
+description = "std::thread implementation of the RTS2601 pipeline."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+rts-core = { workspace = true }
+ureq = { workspace = true }
+crossbeam-channel = { workspace = true }
+crossbeam-utils = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+num_cpus = { workspace = true }
+thiserror = { workspace = true }
+rand = { workspace = true }

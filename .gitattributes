@@ -1,0 +1,18 @@
+# Normalise line endings: store LF in repo, check out platform-native.
+* text=auto eol=lf
+
+# Rust / config files always LF.
+*.rs       text eol=lf
+*.toml     text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+*.md       text eol=lf
+Makefile   text eol=lf
+
+# Binary files we want to track but never diff.
+*.docx     binary
+*.png      binary
+*.pdf      binary
+*.ndjson   binary
+*.hgrm     binary
+*.json -text

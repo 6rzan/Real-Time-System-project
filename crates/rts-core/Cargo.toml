@@ -1,0 +1,23 @@
+[package]
+name = "rts-core"
+description = "Runtime-agnostic primitives for the RTS2601 Wikipedia SSE pipeline."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+parking_lot = { workspace = true }
+hdrhistogram = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+
+[features]
+default = []
+# Forces the parser to take the deliberately-allocating path (used by the dhat
+# zero-copy comparison). The default path is zero-copy via Cow<'a, str>.
+owned-baseline = []

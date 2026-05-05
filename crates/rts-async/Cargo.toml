@@ -1,0 +1,25 @@
+[package]
+name = "rts-async"
+description = "Tokio async/await implementation of the RTS2601 pipeline."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+rts-core = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "signal", "io-util", "net"] }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
+futures = { workspace = true }
+reqwest = { workspace = true }
+eventsource-stream = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+parking_lot = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+bytes = { workspace = true }
+thiserror = { workspace = true }

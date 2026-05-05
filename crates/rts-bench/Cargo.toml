@@ -1,0 +1,27 @@
+[package]
+name = "rts-bench"
+description = "Criterion benchmark harnesses for the RTS2601 pipeline."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+rts-core = { workspace = true }
+rts-async = { workspace = true }
+rts-threaded = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+parking_lot = { workspace = true }
+crossbeam-utils = { workspace = true }
+dashmap = { workspace = true }
+core_affinity = { workspace = true }
+num_cpus = { workspace = true }
+
+[[bench]]
+name = "placeholder"
+harness = false

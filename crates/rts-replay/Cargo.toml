@@ -1,0 +1,20 @@
+[package]
+name = "rts-replay"
+description = "SSE record + replay infrastructure (deterministic test source and demo fallback)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "net", "fs"] }
+tokio-stream = { workspace = true }
+axum = { workspace = true }
+hyper = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }

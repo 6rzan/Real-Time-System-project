@@ -1,0 +1,42 @@
+# Rust build artefacts
+/target/
+**/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo.lock is committed (see workspace policy below)
+# We DO commit Cargo.lock for binary workspaces.
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local env
+.env
+.env.local
+
+# Heap profiles (large, regenerated on demand)
+dhat-heap.json
+**/dhat-heap.json
+
+# Run logs (regenerated). Keep the directory itself via .gitkeep.
+reports/runs/*.ndjson
+reports/runs/*.log
+
+# Criterion output (huge HTML; regenerable)
+target/criterion/
+
+# Plots that the report regenerates (kept in docs/research-report/figures/ instead)
+reports/plots/*.png
+reports/plots/*.pdf
+
+# Non-essential local doc binaries (large reference material)
+Rust_documentation*.docx
+
+# Claude / agent scratch dirs (project local)
+.claude/local/
+.claude/settings.local.json
