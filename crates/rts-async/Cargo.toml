@@ -23,3 +23,4 @@ tracing = { workspace = true }
 rand = { workspace = true }
 bytes = { workspace = true }
 thiserror = { workspace = true }
+num_cpus = { workspace = true }

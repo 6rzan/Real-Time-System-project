@@ -16,11 +16,13 @@
 pub mod channel;
 pub mod error;
 pub mod event;
+pub mod metrics;
 pub mod priority;
 pub mod task;
 pub mod time;
 
 pub use error::RtsError;
 pub use event::{cow_stats, parse_one, Event, OwnedEvent};
+pub use metrics::Metrics;
 pub use priority::Priority;
 pub use task::Task;

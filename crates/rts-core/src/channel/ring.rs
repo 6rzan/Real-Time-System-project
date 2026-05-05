@@ -14,7 +14,7 @@ pub enum PushOutcome {
 
 /// A thread-safe, multi-producer, multi-consumer ring buffer that drops the oldest
 /// elements when full, maintaining a bounded capacity.
-/// Supports both async (Tokio) and blocking (std::thread) pop operations.
+/// Supports both async (Tokio) and blocking (`std::thread`) pop operations.
 #[derive(Debug)]
 pub struct DropOldestRing<T> {
     queue: Mutex<VecDeque<T>>,
@@ -155,7 +155,7 @@ mod tests {
                 }
             }
 
-            assert_eq!(ring.overflow_count(), expected_drops as u64);
+            assert_eq!(ring.overflow_count(), u64::try_from(expected_drops).unwrap());
             assert!(ring.len() <= cap);
 
             let mut extracted = Vec::new();

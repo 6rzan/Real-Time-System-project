@@ -1,8 +1,9 @@
 //! `rts` — CLI entry point.
 //!
-//! P1 wires the `run-async` subcommand: connect to the live Wikipedia SSE
-//! firehose and forward events to stdout as one JSON line per event. Future
-//! phases add `run-threaded`, `replay record/play`, and `analyse`.
+//! Subcommands:
+//! - `run-async`   — full Tokio async pipeline (ingest → parse → workers → leaderboard)
+//! - `replay record` — capture live SSE to NDJSON fixture
+//! - `replay play`   — serve a fixture over local HTTP+SSE
 
 #![deny(rust_2018_idioms, unsafe_code)]
 #![warn(clippy::pedantic)]
@@ -19,9 +20,9 @@ use std::time::Duration;
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use rts_async::ingest;
+use rts_async::pipeline::PipelineConfig;
 use rts_replay::Rate;
 use tokio_util::sync::CancellationToken;
-use tracing_subscriber::EnvFilter;
 
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
@@ -36,7 +37,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Run the Tokio async pipeline.
+    /// Run the full Tokio async pipeline.
     RunAsync(RunAsyncArgs),
     /// Record a live SSE trace, or replay a recorded one as a local server.
     Replay {
@@ -59,8 +60,7 @@ struct RecordArgs {
     #[arg(long, default_value = ingest::DEFAULT_URL)]
     url: String,
 
-    /// Capture for this much wall-clock time, then stop. Same suffixes as
-    /// `--duration` on `run-async` (`ms`, `s`, `m`, `h`).
+    /// Capture for this much wall-clock time, then stop.
     #[arg(long, value_parser = parse_duration)]
     duration: Duration,
 
@@ -75,7 +75,7 @@ struct PlayArgs {
     #[arg(long)]
     fixture: PathBuf,
 
-    /// Replay rate: `1x` (wall-clock), `10x`, `100x`, `2.5`, or `max`.
+    /// Replay rate: `1x`, `10x`, `100x`, `2.5`, or `max`.
     #[arg(long, default_value = "1x", value_parser = parse_rate)]
     rate: Rate,
 
@@ -98,15 +98,25 @@ struct RunAsyncArgs {
     #[arg(long)]
     limit: Option<usize>,
 
-    /// Stop after this much wall-clock time. Accepts plain seconds or a unit
-    /// suffix (`ms`, `s`, `m`, `h`). Specify either `--limit` or `--duration`,
-    /// or neither (run until Ctrl-C).
+    /// Stop after this much wall-clock time (`ms`, `s`, `m`, `h` suffixes).
     #[arg(long, value_parser = parse_duration)]
     duration: Option<Duration>,
+
+    /// Number of worker tasks. Defaults to the logical CPU count.
+    #[arg(long)]
+    workers: Option<usize>,
+
+    /// Capacity of each priority lane's drop-oldest ring buffer.
+    #[arg(long, default_value_t = 256)]
+    capacity: usize,
+
+    /// Write per-event NDJSON logs to this file (creates parent dirs).
+    /// Example: `reports/runs/async_run.ndjson`
+    #[arg(long)]
+    log_path: Option<PathBuf>,
 }
 
 fn parse_duration(raw: &str) -> Result<Duration, String> {
-    // Split into leading numeric portion and trailing unit suffix.
     let unit_start = raw
         .find(|c: char| !(c.is_ascii_digit() || c == '.'))
         .unwrap_or(raw.len());
@@ -134,9 +144,16 @@ fn main() -> anyhow::Result<()> {
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
 
-    init_tracing();
-
     let cli = Cli::parse();
+
+    // Determine the per-event log path before initialising tracing so we can
+    // add the file layer to the subscriber before calling set_global_default.
+    let log_path: Option<PathBuf> = match &cli.command {
+        Command::RunAsync(args) => args.log_path.clone(),
+        Command::Replay { .. } => None,
+    };
+    let _tracing_guard = init_tracing(log_path.as_deref());
+
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -152,39 +169,94 @@ fn main() -> anyhow::Result<()> {
     })
 }
 
-fn init_tracing() {
+/// Initialise the global tracing subscriber.
+///
+/// When `log_path` is `Some`, a second JSON layer writes per-event records
+/// (target `rts.worker` and `overflow`) to that file via a non-blocking
+/// background writer. The returned guard must be kept alive for the duration
+/// of the program.
+fn init_tracing(
+    log_path: Option<&std::path::Path>,
+) -> Option<tracing_appender::non_blocking::WorkerGuard> {
+    use tracing_subscriber::prelude::*;
+    use tracing_subscriber::{EnvFilter, fmt};
+
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    tracing_subscriber::fmt()
+
+    let stderr_layer = fmt::layer()
         .json()
-        .with_env_filter(filter)
-        .with_target(true)
-        .with_current_span(false)
         .with_writer(std::io::stderr)
-        .init();
+        .with_target(true)
+        .with_current_span(false);
+
+    if let Some(path) = log_path {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        let dir = path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let file_name = path
+            .file_name()
+            .unwrap_or_else(|| std::ffi::OsStr::new("run.ndjson"));
+
+        let (non_blocking, guard) =
+            tracing_appender::non_blocking(tracing_appender::rolling::never(dir, file_name));
+
+        // Only write per-event records to the NDJSON file; infrastructure logs
+        // stay on stderr.
+        let file_filter = tracing_subscriber::filter::Targets::new()
+            .with_target("rts.worker", tracing::Level::INFO)
+            .with_target("overflow", tracing::Level::WARN);
+
+        let file_layer = fmt::layer()
+            .json()
+            .with_writer(non_blocking)
+            .with_target(true)
+            .with_current_span(false)
+            .with_filter(file_filter);
+
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(stderr_layer)
+            .with(file_layer)
+            .init();
+
+        Some(guard)
+    } else {
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(stderr_layer)
+            .init();
+        None
+    }
 }
 
 async fn run_async(args: RunAsyncArgs) -> anyhow::Result<()> {
     let cancel = CancellationToken::new();
     install_ctrl_c(&cancel);
+
     if let Some(d) = args.duration {
-        let cancel_for_timer = cancel.clone();
+        let c = cancel.clone();
         tokio::spawn(async move {
             tokio::time::sleep(d).await;
             tracing::info!(target: "rts.cli", "duration elapsed; cancelling");
-            cancel_for_timer.cancel();
+            c.cancel();
         });
     }
 
-    let outcome = ingest::run_sse(&args.url, args.limit, cancel.clone(), |data| {
-        // P1: forward each event's data payload (which is one JSON object per
-        // event) verbatim to stdout, one line per event. Downstream phases
-        // replace this sink with the parser stage.
-        println!("{data}");
-    })
-    .await
-    .context("SSE ingest")?;
+    let workers = args.workers.unwrap_or_else(num_cpus::get);
+    let cfg = PipelineConfig {
+        url: args.url,
+        limit: args.limit,
+        workers,
+        capacity: args.capacity,
+        cancel,
+    };
 
-    tracing::info!(target: "rts.cli", outcome = ?outcome, "ingest finished");
+    rts_async::pipeline::run(cfg)
+        .await
+        .context("async pipeline")?;
     Ok(())
 }
 
@@ -228,14 +300,14 @@ async fn replay_play(args: PlayArgs) -> anyhow::Result<()> {
 }
 
 fn install_ctrl_c(cancel: &CancellationToken) {
-    let cancel = cancel.clone();
+    let c = cancel.clone();
     tokio::spawn(async move {
         if let Err(e) = tokio::signal::ctrl_c().await {
             tracing::warn!(target: "rts.cli", error = %e, "ctrl-c handler failed");
             return;
         }
         tracing::info!(target: "rts.cli", "Ctrl-C received; cancelling");
-        cancel.cancel();
+        c.cancel();
     });
 }
 
