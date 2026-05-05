@@ -40,3 +40,4 @@ Rust_documentation*.docx
 # Claude / agent scratch dirs (project local)
 .claude/local/
 .claude/settings.local.json
+CLAUDE.md
