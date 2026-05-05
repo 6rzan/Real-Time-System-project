@@ -1439,13 +1439,16 @@ name = "rts-replay"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "bytes",
  "futures",
  "hyper",
+ "rts-async",
  "serde",
  "serde_json",
  "thiserror",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tracing",
 ]
 

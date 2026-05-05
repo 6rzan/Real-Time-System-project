@@ -12,11 +12,14 @@
     clippy::missing_panics_doc
 )]
 
+use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use rts_async::ingest;
+use rts_replay::Rate;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
@@ -35,6 +38,54 @@ struct Cli {
 enum Command {
     /// Run the Tokio async pipeline.
     RunAsync(RunAsyncArgs),
+    /// Record a live SSE trace, or replay a recorded one as a local server.
+    Replay {
+        #[command(subcommand)]
+        cmd: ReplayCmd,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ReplayCmd {
+    /// Capture a live SSE trace into NDJSON (`{"recv_ns","data"}` per line).
+    Record(RecordArgs),
+    /// Serve a recorded fixture over HTTP+SSE on 127.0.0.1.
+    Play(PlayArgs),
+}
+
+#[derive(Debug, clap::Args)]
+struct RecordArgs {
+    /// SSE endpoint to record. Defaults to the live Wikimedia firehose.
+    #[arg(long, default_value = ingest::DEFAULT_URL)]
+    url: String,
+
+    /// Capture for this much wall-clock time, then stop. Same suffixes as
+    /// `--duration` on `run-async` (`ms`, `s`, `m`, `h`).
+    #[arg(long, value_parser = parse_duration)]
+    duration: Duration,
+
+    /// NDJSON output path (parent directories are created on demand).
+    #[arg(long)]
+    out: PathBuf,
+}
+
+#[derive(Debug, clap::Args)]
+struct PlayArgs {
+    /// Recorded NDJSON fixture to replay.
+    #[arg(long)]
+    fixture: PathBuf,
+
+    /// Replay rate: `1x` (wall-clock), `10x`, `100x`, `2.5`, or `max`.
+    #[arg(long, default_value = "1x", value_parser = parse_rate)]
+    rate: Rate,
+
+    /// TCP port to bind on `127.0.0.1`.
+    #[arg(long, default_value_t = 8080)]
+    port: u16,
+}
+
+fn parse_rate(raw: &str) -> Result<Rate, String> {
+    Rate::parse(raw).map_err(|e| e.to_string())
 }
 
 #[derive(Debug, clap::Args)]
@@ -93,6 +144,10 @@ fn main() -> anyhow::Result<()> {
     runtime.block_on(async move {
         match cli.command {
             Command::RunAsync(args) => run_async(args).await,
+            Command::Replay { cmd } => match cmd {
+                ReplayCmd::Record(args) => replay_record(args).await,
+                ReplayCmd::Play(args) => replay_play(args).await,
+            },
         }
     })
 }
@@ -130,6 +185,45 @@ async fn run_async(args: RunAsyncArgs) -> anyhow::Result<()> {
     .context("SSE ingest")?;
 
     tracing::info!(target: "rts.cli", outcome = ?outcome, "ingest finished");
+    Ok(())
+}
+
+async fn replay_record(args: RecordArgs) -> anyhow::Result<()> {
+    let cancel = CancellationToken::new();
+    install_ctrl_c(&cancel);
+    tracing::info!(
+        target: "rts.cli",
+        url = %args.url,
+        out = %args.out.display(),
+        duration_ms = u64::try_from(args.duration.as_millis()).unwrap_or(u64::MAX),
+        "starting recording"
+    );
+    let count = rts_replay::record::record(&args.url, &args.out, Some(args.duration), cancel)
+        .await
+        .context("replay record")?;
+    tracing::info!(
+        target: "rts.cli",
+        events = count,
+        path = %args.out.display(),
+        "recording complete"
+    );
+    Ok(())
+}
+
+async fn replay_play(args: PlayArgs) -> anyhow::Result<()> {
+    let cancel = CancellationToken::new();
+    install_ctrl_c(&cancel);
+    let addr = SocketAddr::from(([127, 0, 0, 1], args.port));
+    tracing::info!(
+        target: "rts.cli",
+        fixture = %args.fixture.display(),
+        rate = ?args.rate,
+        addr = %addr,
+        "starting replay server"
+    );
+    rts_replay::play::serve(&args.fixture, args.rate, addr, cancel)
+        .await
+        .context("replay play")?;
     Ok(())
 }
 

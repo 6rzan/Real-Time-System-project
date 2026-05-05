@@ -12,3 +12,9 @@
     clippy::missing_errors_doc,
     clippy::missing_panics_doc
 )]
+
+pub mod play;
+pub mod record;
+
+pub use play::{ParseRateError, PlayError, Rate, RecordedEvent};
+pub use record::RecordError;

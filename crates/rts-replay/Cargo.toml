@@ -9,11 +9,14 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+rts-async = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "net", "fs"] }
 tokio-stream = { workspace = true }
+tokio-util = { workspace = true, features = ["rt"] }
 axum = { workspace = true }
 hyper = { workspace = true }
 futures = { workspace = true }
+bytes = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
