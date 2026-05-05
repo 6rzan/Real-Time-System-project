@@ -18,6 +18,7 @@ rts-async = { workspace = true }
 rts-threaded = { workspace = true }
 rts-replay = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time"] }
+tokio-util = { workspace = true, features = ["rt"] }
 clap = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }

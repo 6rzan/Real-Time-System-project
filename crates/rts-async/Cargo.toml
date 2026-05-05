@@ -12,7 +12,7 @@ repository.workspace = true
 rts-core = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "signal", "io-util", "net"] }
 tokio-stream = { workspace = true }
-tokio-util = { workspace = true }
+tokio-util = { workspace = true, features = ["rt"] }
 futures = { workspace = true }
 reqwest = { workspace = true }
 eventsource-stream = { workspace = true }
