@@ -12,3 +12,15 @@
     clippy::missing_errors_doc,
     clippy::missing_panics_doc
 )]
+
+pub mod channel;
+pub mod error;
+pub mod event;
+pub mod priority;
+pub mod task;
+pub mod time;
+
+pub use error::RtsError;
+pub use event::{cow_stats, parse_one, Event, OwnedEvent};
+pub use priority::Priority;
+pub use task::Task;
