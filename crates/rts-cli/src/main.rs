@@ -15,6 +15,8 @@
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -39,6 +41,8 @@ struct Cli {
 enum Command {
     /// Run the full Tokio async pipeline.
     RunAsync(RunAsyncArgs),
+    /// Run the `std::thread` pipeline (mirrors run-async but on OS threads).
+    RunThreaded(RunThreadedArgs),
     /// Record a live SSE trace, or replay a recorded one as a local server.
     Replay {
         #[command(subcommand)]
@@ -82,6 +86,33 @@ struct PlayArgs {
     /// TCP port to bind on `127.0.0.1`.
     #[arg(long, default_value_t = 8080)]
     port: u16,
+}
+
+#[derive(Debug, clap::Args)]
+struct RunThreadedArgs {
+    /// SSE endpoint to ingest from. Defaults to the live Wikimedia firehose.
+    #[arg(long, default_value = rts_threaded::ingest::DEFAULT_URL)]
+    url: String,
+
+    /// Stop after N events have been forwarded.
+    #[arg(long)]
+    limit: Option<usize>,
+
+    /// Stop after this much wall-clock time (`ms`, `s`, `m`, `h` suffixes).
+    #[arg(long, value_parser = parse_duration)]
+    duration: Option<Duration>,
+
+    /// Number of worker threads. Defaults to logical CPUs minus 2.
+    #[arg(long)]
+    workers: Option<usize>,
+
+    /// Capacity of the shared priority queue.
+    #[arg(long, default_value_t = 256)]
+    capacity: usize,
+
+    /// Write per-event NDJSON logs to this file (creates parent dirs).
+    #[arg(long)]
+    log_path: Option<PathBuf>,
 }
 
 fn parse_rate(raw: &str) -> Result<Rate, String> {
@@ -150,6 +181,7 @@ fn main() -> anyhow::Result<()> {
     // add the file layer to the subscriber before calling set_global_default.
     let log_path: Option<PathBuf> = match &cli.command {
         Command::RunAsync(args) => args.log_path.clone(),
+        Command::RunThreaded(args) => args.log_path.clone(),
         Command::Replay { .. } => None,
     };
     let _tracing_guard = init_tracing(log_path.as_deref());
@@ -161,6 +193,7 @@ fn main() -> anyhow::Result<()> {
     runtime.block_on(async move {
         match cli.command {
             Command::RunAsync(args) => run_async(args).await,
+            Command::RunThreaded(args) => run_threaded(args).await,
             Command::Replay { cmd } => match cmd {
                 ReplayCmd::Record(args) => replay_record(args).await,
                 ReplayCmd::Play(args) => replay_play(args).await,
@@ -297,6 +330,49 @@ async fn replay_play(args: PlayArgs) -> anyhow::Result<()> {
         .await
         .context("replay play")?;
     Ok(())
+}
+
+async fn run_threaded(args: RunThreadedArgs) -> anyhow::Result<()> {
+    let cancel = Arc::new(AtomicBool::new(false));
+
+    // Ctrl-C handler — set the AtomicBool.
+    {
+        let c = Arc::clone(&cancel);
+        tokio::spawn(async move {
+            if tokio::signal::ctrl_c().await.is_ok() {
+                tracing::info!(target: "rts.cli", "Ctrl-C received; cancelling threaded pipeline");
+                c.store(true, Ordering::Relaxed);
+            }
+        });
+    }
+
+    // Duration timer.
+    if let Some(d) = args.duration {
+        let c = Arc::clone(&cancel);
+        tokio::spawn(async move {
+            tokio::time::sleep(d).await;
+            tracing::info!(target: "rts.cli", "duration elapsed; cancelling threaded pipeline");
+            c.store(true, Ordering::Relaxed);
+        });
+    }
+
+    let workers = args
+        .workers
+        .unwrap_or_else(|| num_cpus::get().saturating_sub(2).max(1));
+
+    let cfg = rts_threaded::pipeline::PipelineConfig {
+        url: args.url,
+        limit: args.limit,
+        workers,
+        capacity: args.capacity,
+        cancel,
+    };
+
+    // Run the blocking pipeline on a dedicated thread so we don't block Tokio.
+    tokio::task::spawn_blocking(move || rts_threaded::pipeline::run(cfg))
+        .await
+        .context("threaded pipeline thread panicked")?
+        .context("threaded pipeline")
 }
 
 fn install_ctrl_c(cancel: &CancellationToken) {
