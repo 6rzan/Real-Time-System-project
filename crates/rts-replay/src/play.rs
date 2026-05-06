@@ -54,9 +54,7 @@ impl Rate {
         if s.eq_ignore_ascii_case("max") {
             return Ok(Rate::Max);
         }
-        let stripped = s
-            .strip_suffix(|c: char| c == 'x' || c == 'X')
-            .unwrap_or(s);
+        let stripped = s.strip_suffix(|c: char| c == 'x' || c == 'X').unwrap_or(s);
         let v: f64 = stripped
             .parse()
             .map_err(|_| ParseRateError(s.to_string()))?;
@@ -106,11 +104,10 @@ pub async fn load_fixture(path: &Path) -> Result<Vec<RecordedEvent>, PlayError> 
         if line.trim().is_empty() {
             continue;
         }
-        let env: Envelope =
-            serde_json::from_str(&line).map_err(|e| PlayError::BadEnvelope {
-                line: line_no,
-                source: e,
-            })?;
+        let env: Envelope = serde_json::from_str(&line).map_err(|e| PlayError::BadEnvelope {
+            line: line_no,
+            source: e,
+        })?;
         out.push(RecordedEvent {
             recv_ns: env.recv_ns,
             data: env.data,
@@ -165,10 +162,7 @@ async fn stream_handler(State(state): State<AppState>) -> Response {
             header::CONTENT_TYPE,
             HeaderValue::from_static("text/event-stream"),
         )
-        .header(
-            header::CACHE_CONTROL,
-            HeaderValue::from_static("no-cache"),
-        )
+        .header(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"))
         // Disable proxy buffering for SSE behaviour parity. Harmless if absent.
         .header("x-accel-buffering", HeaderValue::from_static("no"))
         .body(body)
@@ -249,9 +243,15 @@ mod tests {
 
     #[test]
     fn rate_parses_common_forms() {
-        assert!(matches!(Rate::parse("1x").unwrap(), Rate::Multiplier(v) if (v - 1.0).abs() < 1e-9));
-        assert!(matches!(Rate::parse("10x").unwrap(), Rate::Multiplier(v) if (v - 10.0).abs() < 1e-9));
-        assert!(matches!(Rate::parse("2.5").unwrap(), Rate::Multiplier(v) if (v - 2.5).abs() < 1e-9));
+        assert!(
+            matches!(Rate::parse("1x").unwrap(), Rate::Multiplier(v) if (v - 1.0).abs() < 1e-9)
+        );
+        assert!(
+            matches!(Rate::parse("10x").unwrap(), Rate::Multiplier(v) if (v - 10.0).abs() < 1e-9)
+        );
+        assert!(
+            matches!(Rate::parse("2.5").unwrap(), Rate::Multiplier(v) if (v - 2.5).abs() < 1e-9)
+        );
         assert!(matches!(Rate::parse("MAX").unwrap(), Rate::Max));
         assert!(matches!(Rate::parse("max").unwrap(), Rate::Max));
     }

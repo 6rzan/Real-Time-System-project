@@ -57,16 +57,13 @@ impl Metrics {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             drift_human: Mutex::new(
-                Histogram::new_with_bounds(1, 60_000_000_000, 3)
-                    .expect("valid histogram bounds"),
+                Histogram::new_with_bounds(1, 60_000_000_000, 3).expect("valid histogram bounds"),
             ),
             drift_bot: Mutex::new(
-                Histogram::new_with_bounds(1, 60_000_000_000, 3)
-                    .expect("valid histogram bounds"),
+                Histogram::new_with_bounds(1, 60_000_000_000, 3).expect("valid histogram bounds"),
             ),
             jitter: Mutex::new(
-                Histogram::new_with_bounds(1, 60_000_000_000, 3)
-                    .expect("valid histogram bounds"),
+                Histogram::new_with_bounds(1, 60_000_000_000, 3).expect("valid histogram bounds"),
             ),
             deadline_miss_human: AtomicU64::new(0),
             deadline_miss_bot: AtomicU64::new(0),
@@ -187,13 +184,28 @@ impl Metrics {
             .map_err(|e| std::io::Error::other(e.to_string()))?;
 
         writer
-            .write_histogram(&dh, std::time::Duration::ZERO, std::time::Duration::from_secs(0), None)
+            .write_histogram(
+                &dh,
+                std::time::Duration::ZERO,
+                std::time::Duration::from_secs(0),
+                None,
+            )
             .map_err(|e| std::io::Error::other(e.to_string()))?;
         writer
-            .write_histogram(&db, std::time::Duration::from_secs(1), std::time::Duration::from_secs(0), None)
+            .write_histogram(
+                &db,
+                std::time::Duration::from_secs(1),
+                std::time::Duration::from_secs(0),
+                None,
+            )
             .map_err(|e| std::io::Error::other(e.to_string()))?;
         writer
-            .write_histogram(&j, std::time::Duration::from_secs(2), std::time::Duration::from_secs(0), None)
+            .write_histogram(
+                &j,
+                std::time::Duration::from_secs(2),
+                std::time::Duration::from_secs(0),
+                None,
+            )
             .map_err(|e| std::io::Error::other(e.to_string()))?;
 
         Ok(())
@@ -209,7 +221,7 @@ mod tests {
         let m = Metrics::new();
         for _ in 0..1000 {
             m.record_drift(Priority::Human, Duration::from_micros(500));
-            m.record_drift(Priority::Bot, Duration::from_micros(5_000));
+            m.record_drift(Priority::Bot, Duration::from_millis(5));
             m.record_jitter(Duration::from_micros(100));
         }
         m.record_deadline_miss(Priority::Human);

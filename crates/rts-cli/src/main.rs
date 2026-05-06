@@ -240,7 +240,7 @@ fn init_tracing(
     log_path: Option<&std::path::Path>,
 ) -> Option<tracing_appender::non_blocking::WorkerGuard> {
     use tracing_subscriber::prelude::*;
-    use tracing_subscriber::{EnvFilter, fmt};
+    use tracing_subscriber::{fmt, EnvFilter};
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
@@ -254,9 +254,7 @@ fn init_tracing(
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).ok();
         }
-        let dir = path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."));
+        let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
         let file_name = path
             .file_name()
             .unwrap_or_else(|| std::ffi::OsStr::new("run.ndjson"));
@@ -461,7 +459,7 @@ mod tests {
     fn parses_unit_suffixes() {
         assert_eq!(parse_duration("3s").unwrap(), Duration::from_secs(3));
         assert_eq!(parse_duration("250ms").unwrap(), Duration::from_millis(250));
-        assert_eq!(parse_duration("2m").unwrap(), Duration::from_secs(120));
+        assert_eq!(parse_duration("2m").unwrap(), Duration::from_mins(2));
     }
 
     #[test]

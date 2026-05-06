@@ -17,7 +17,7 @@
 use std::sync::{Arc, Mutex as StdMutex};
 use std::thread;
 
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use crossbeam_channel::bounded;
 use dashmap::DashMap;
 use parking_lot::Mutex as PlMutex;

@@ -83,8 +83,8 @@ pub fn parse_one<'a>(buf: &'a str) -> Result<Event<'a>, crate::error::RtsError> 
     // owned. Otherwise, it's borrowed. This is a simplification; in reality,
     // individual fields could be mixed (some borrowed, some owned), but
     // Wikipedia's stream is mostly ASCII, so we expect nearly all borrowed.
-    let has_owned = matches!(event.user, Cow::Owned(_))
-        || matches!(event.server_name, Cow::Owned(_));
+    let has_owned =
+        matches!(event.user, Cow::Owned(_)) || matches!(event.server_name, Cow::Owned(_));
 
     if has_owned {
         OWNED_COUNT.fetch_add(1, Ordering::Relaxed);
@@ -109,17 +109,12 @@ pub fn parse_one<'a>(buf: &'a str) -> Result<Event<'a>, crate::error::RtsError> 
         .ok_or_else(|| crate::error::RtsError::InvalidEvent("missing user".to_string()))?
         .to_string(); // Force allocation
 
-    let bot = obj
-        .get("bot")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let bot = obj.get("bot").and_then(|v| v.as_bool()).unwrap_or(false);
 
     let server_name = obj
         .get("server_name")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            crate::error::RtsError::InvalidEvent("missing server_name".to_string())
-        })?
+        .ok_or_else(|| crate::error::RtsError::InvalidEvent("missing server_name".to_string()))?
         .to_string(); // Force allocation
 
     OWNED_COUNT.fetch_add(1, Ordering::Relaxed);
@@ -163,7 +158,10 @@ mod tests {
         let json = "{\"user\":\"User\\u00ff\",\"bot\":false,\"server_name\":\"en.wikipedia.org\"}";
         let event = parse_one(json).expect("parse");
         assert_eq!(event.user.as_ref(), "User\u{00ff}");
-        assert!(matches!(event.user, Cow::Owned(_)), "user should be owned due to escape");
+        assert!(
+            matches!(event.user, Cow::Owned(_)),
+            "user should be owned due to escape"
+        );
     }
 
     #[test]

@@ -106,7 +106,9 @@ fn read_stream(
             // ureq errors are not std::io::Error; treat as a warn + reconnect.
             tracing::warn!(target: "rts.threaded.ingest", error = %e, "connect failed");
             // Return an IO error kind so the outer loop triggers back-off.
-            return Err(std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e.to_string()).into());
+            return Err(
+                std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e.to_string()).into(),
+            );
         }
     };
 

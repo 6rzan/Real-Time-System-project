@@ -70,8 +70,7 @@ pub async fn record(
             while let Some((recv_ns, data)) = rx.recv().await {
                 let envelope = serde_json::json!({ "recv_ns": recv_ns, "data": data });
                 // serde_json::to_vec on a Value never fails.
-                let mut line = serde_json::to_vec(&envelope)
-                    .expect("serialise NDJSON envelope");
+                let mut line = serde_json::to_vec(&envelope).expect("serialise NDJSON envelope");
                 line.push(b'\n');
                 writer.write_all(&line).await?;
                 count = count.saturating_add(1);

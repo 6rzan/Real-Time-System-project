@@ -129,12 +129,9 @@ pub async fn run(cfg: PipelineConfig) -> Result<(), PipelineError> {
     let lo2 = Arc::clone(&lo);
     let wd2 = Arc::clone(&watchdog);
     let fs2 = Arc::clone(&failsafe);
-    let outcome = crate::ingest::run_sse(
-        &cfg.url,
-        cfg.limit,
-        cfg.cancel.clone(),
-        move |raw| crate::parser::dispatch(raw, &hi2, &lo2, &wd2, &fs2),
-    )
+    let outcome = crate::ingest::run_sse(&cfg.url, cfg.limit, cfg.cancel.clone(), move |raw| {
+        crate::parser::dispatch(raw, &hi2, &lo2, &wd2, &fs2);
+    })
     .await?;
 
     tracing::info!(target: "rts.pipeline", outcome = ?outcome, "ingest finished");
@@ -165,13 +162,15 @@ pub async fn run(cfg: PipelineConfig) -> Result<(), PipelineError> {
     println!("\n=== Metrics (nanoseconds) ===");
     println!(
         "Drift  Human  p50={:>10}  p90={:>10}  p99={:>10}  p99.9={:>10}  n={}",
-        s.drift_human_p50, s.drift_human_p90, s.drift_human_p99, s.drift_human_p999,
+        s.drift_human_p50,
+        s.drift_human_p90,
+        s.drift_human_p99,
+        s.drift_human_p999,
         s.sample_count_human
     );
     println!(
         "Drift  Bot    p50={:>10}  p90={:>10}  p99={:>10}  p99.9={:>10}  n={}",
-        s.drift_bot_p50, s.drift_bot_p90, s.drift_bot_p99, s.drift_bot_p999,
-        s.sample_count_bot
+        s.drift_bot_p50, s.drift_bot_p90, s.drift_bot_p99, s.drift_bot_p999, s.sample_count_bot
     );
     println!(
         "Jitter        p50={:>10}  p90={:>10}  p99={:>10}  p99.9={:>10}",
@@ -189,7 +188,7 @@ pub async fn run(cfg: PipelineConfig) -> Result<(), PipelineError> {
 
     let (borrowed, owned) = cow_stats();
     let total = borrowed + owned;
-    let pct = if total > 0 { (borrowed * 100) / total } else { 0 };
+    let pct = (borrowed * 100).checked_div(total).unwrap_or(0);
     println!("Cow stats: borrowed={borrowed}  owned={owned}  ({pct}% borrowed)");
 
     // ── Dump metrics files ───────────────────────────────────────────────────

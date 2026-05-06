@@ -34,13 +34,11 @@ use rts_core::event::parse_one;
 const ITERATIONS: usize = 10_000;
 
 /// A realistic ASCII-only recentchange event (the common case on Wikipedia).
-const ASCII_EVENT: &str =
-    r#"{"user":"SomeEditor","bot":false,"server_name":"en.wikipedia.org"}"#;
+const ASCII_EVENT: &str = r#"{"user":"SomeEditor","bot":false,"server_name":"en.wikipedia.org"}"#;
 
 /// An event with a Unicode escape in the user field — forces serde to
 /// allocate even on the zero-copy path.
-const ESCAPE_EVENT: &str =
-    r#"{"user":"Userédits","bot":false,"server_name":"fr.wikipedia.org"}"#;
+const ESCAPE_EVENT: &str = r#"{"user":"Userédits","bot":false,"server_name":"fr.wikipedia.org"}"#;
 
 fn main() {
     #[cfg(feature = "dhat-heap")]
@@ -76,7 +74,7 @@ fn main() {
     // cow_stats() returns (borrowed, owned) totals since process start.
     let (borrowed, owned) = rts_core::event::cow_stats();
     let total = borrowed + owned;
-    let borrow_pct = if total > 0 { (borrowed * 100) / total } else { 0 };
+    let borrow_pct = (borrowed * 100).checked_div(total).unwrap_or(0);
 
     println!("Events parsed   : {parsed}");
     println!("Cow::Borrowed   : {borrowed}  ({borrow_pct}%)");

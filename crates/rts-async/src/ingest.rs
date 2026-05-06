@@ -69,7 +69,7 @@ where
         // Wikipedia keeps the connection open indefinitely; we treat 60 s of
         // total silence as fatal at the HTTP layer (the watchdog enforces a
         // tighter 10 s SLA over the framed stream in P8).
-        .read_timeout(Duration::from_secs(60))
+        .read_timeout(Duration::from_mins(1))
         .connect_timeout(Duration::from_secs(15))
         .build()
         .map_err(IngestError::ClientBuild)?;

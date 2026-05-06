@@ -77,11 +77,7 @@ pub fn run(cfg: PipelineConfig) -> Result<(), PipelineError> {
         let wd = Arc::clone(&watchdog);
         let cancel = Arc::clone(&cfg.cancel);
         std::thread::spawn(move || {
-            rts_core::watchdog::run_sync_checker(
-                &wd,
-                std::time::Duration::from_secs(5),
-                &cancel,
-            );
+            rts_core::watchdog::run_sync_checker(&wd, std::time::Duration::from_secs(5), &cancel);
         });
     }
 
@@ -111,12 +107,9 @@ pub fn run(cfg: PipelineConfig) -> Result<(), PipelineError> {
     let q2 = Arc::clone(&queue);
     let wd2 = Arc::clone(&watchdog);
     let fs2 = Arc::clone(&failsafe);
-    let outcome = ingest::run_sse(
-        &cfg.url,
-        cfg.limit,
-        Arc::clone(&cfg.cancel),
-        move |raw| crate::parser::dispatch(raw, &q2, &wd2, &fs2),
-    )?;
+    let outcome = ingest::run_sse(&cfg.url, cfg.limit, Arc::clone(&cfg.cancel), move |raw| {
+        crate::parser::dispatch(raw, &q2, &wd2, &fs2);
+    })?;
 
     tracing::info!(target: "rts.threaded.pipeline", outcome = ?outcome, "ingest finished");
 
@@ -159,11 +152,7 @@ pub fn run(cfg: PipelineConfig) -> Result<(), PipelineError> {
     );
     println!(
         "Drift  Bot    p50={:>10}  p90={:>10}  p99={:>10}  p99.9={:>10}  n={}",
-        s.drift_bot_p50,
-        s.drift_bot_p90,
-        s.drift_bot_p99,
-        s.drift_bot_p999,
-        s.sample_count_bot
+        s.drift_bot_p50, s.drift_bot_p90, s.drift_bot_p99, s.drift_bot_p999, s.sample_count_bot
     );
     println!(
         "Jitter        p50={:>10}  p90={:>10}  p99={:>10}  p99.9={:>10}",
@@ -177,7 +166,7 @@ pub fn run(cfg: PipelineConfig) -> Result<(), PipelineError> {
 
     let (borrowed, owned) = cow_stats();
     let total = borrowed + owned;
-    let pct = if total > 0 { (borrowed * 100) / total } else { 0 };
+    let pct = (borrowed * 100).checked_div(total).unwrap_or(0);
     println!("Cow stats: borrowed={borrowed}  owned={owned}  ({pct}% borrowed)");
 
     // ── Dump metrics files ───────────────────────────────────────────────────
@@ -189,11 +178,15 @@ pub fn run(cfg: PipelineConfig) -> Result<(), PipelineError> {
         let hgrm_path = stem.with_extension("hgrm");
         match metrics.dump_csv(&csv_path) {
             Ok(()) => println!("Metrics CSV: {}", csv_path.display()),
-            Err(e) => tracing::warn!(target: "rts.threaded.pipeline", error = %e, "CSV dump failed"),
+            Err(e) => {
+                tracing::warn!(target: "rts.threaded.pipeline", error = %e, "CSV dump failed");
+            }
         }
         match metrics.dump_hgrm(&hgrm_path) {
             Ok(()) => println!("Metrics HGRM: {}", hgrm_path.display()),
-            Err(e) => tracing::warn!(target: "rts.threaded.pipeline", error = %e, "HGRM dump failed"),
+            Err(e) => {
+                tracing::warn!(target: "rts.threaded.pipeline", error = %e, "HGRM dump failed");
+            }
         }
     }
 

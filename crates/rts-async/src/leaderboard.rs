@@ -39,12 +39,9 @@ impl Leaderboard {
                     *self.counts.entry(name).or_insert(0) += 1;
                 }
                 LbCmd::Snapshot(reply) => {
-                    let mut entries: Vec<(String, u64)> = self
-                        .counts
-                        .iter()
-                        .map(|(k, v)| (k.clone(), *v))
-                        .collect();
-                    entries.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+                    let mut entries: Vec<(String, u64)> =
+                        self.counts.iter().map(|(k, v)| (k.clone(), *v)).collect();
+                    entries.sort_unstable_by_key(|b| std::cmp::Reverse(b.1));
                     let _ = reply.send(entries);
                 }
             }

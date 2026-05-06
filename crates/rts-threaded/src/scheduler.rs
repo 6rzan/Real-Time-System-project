@@ -148,7 +148,8 @@ impl PriorityQueue {
                     enqueued_at: pt.enqueued_at,
                 });
             }
-            self.condvar.wait_for(&mut guard, Duration::from_millis(100));
+            self.condvar
+                .wait_for(&mut guard, Duration::from_millis(100));
         }
     }
 
@@ -261,7 +262,10 @@ mod tests {
         assert_eq!(q.push(make_task(Priority::Bot)), PushOutcome::Ok);
         assert_eq!(q.push(make_task(Priority::Bot)), PushOutcome::Ok);
         // Overflow: Human pushed, a Bot should be evicted.
-        assert_eq!(q.push(make_task(Priority::Human)), PushOutcome::DroppedOldest);
+        assert_eq!(
+            q.push(make_task(Priority::Human)),
+            PushOutcome::DroppedOldest
+        );
 
         assert_eq!(q.overflow_count(), 1);
         assert_eq!(q.len(), 2);

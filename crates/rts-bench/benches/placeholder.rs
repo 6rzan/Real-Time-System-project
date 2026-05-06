@@ -1,6 +1,6 @@
 //! Stub bench kept so the `[[bench]] name = "placeholder"` entry compiles.
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, Criterion};
 
 fn bench_noop(c: &mut Criterion) {
     c.bench_function("noop", |b| b.iter(|| 1u64.wrapping_add(1)));
