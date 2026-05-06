@@ -596,44 +596,79 @@ Also expose `cow_was_borrowed` / `cow_was_owned` counters from P3 in shutdown re
 
 ## P14: Research Report
 
-**Goal:** 3000-4000 words, IEEE format, embedding figures from P12. Aligned to grading weights (Design 35%, Results 35%, the rest 10% each).
+**Goal:** 3000-4000 words, **APA referencing format**, embedding figures from P12. Aligned to the brief's Report Criteria rubric: Intro 10% / Related Work 10% / System Design 35% / Results & Discussion 35% / References 10%.
 
-**Structure** (target word counts):
+> **Brief alignment notes (verbatim from `RTS2601_AssignmentBrief_v1.docx`):**
+> - **Reference style:** brief Deliverables says "APA or IEEE"; Report Criteria §5 says **"academic referencing (APA)"**. The rubric (the thing that grades you) wins → **use APA**.
+> - **"Results and Discussion" is ONE section**, not two. Discussion paragraphs sit *under* each result/figure.
+> - Related Work must cover *"Rust, real-time systems, scheduling, **and control**"* — control theory is required, not optional.
+> - System Design must include *"diagrams showing **timing, communication, and control loops**"* — three distinct design diagrams, not just data plots.
+> - **Penalised over 4000 words.** Aim for 3500-3900; leave a buffer.
+> - Confirm the actual due date with the module page — it was truncated in the brief extraction.
 
-1. **Abstract** (~200 w) — one paragraph: problem, dual-runtime contribution, single headline number (e.g. "async halved p99 latency under 10× burst load").
-2. **Introduction** (~350 w) — soft real-time context, two crisp RQs:
+**Structure** (target word counts ≈ 3500 total, leaving headroom):
+
+1. **Abstract** (~200 w) — one paragraph: problem, dual-runtime contribution, one headline number (e.g. "async halved p99 latency under 10× burst load while consuming 40% less RSS").
+2. **Introduction** (~350 w | 10%) — soft real-time context, two crisp RQs:
    - RQ1: Under bursty real-time load, does Tokio async deliver lower tail latency than OS threads in Rust, and at what cost?
    - RQ2: Among Mutex/RwLock/Atomic/sharded variants, which best supports a contended counter substrate?
-3. **Related Work** (~350 w) — **demonstrate theory**:
-   - Liu & Layland (1973): Rate Monotonic schedulability bound `n(2^(1/n)−1)`. Cite. Apply with measured U.
-   - Earliest Deadline First — note Tokio biased select is *static-priority pre-emption*, not EDF.
-   - Priority inversion + Mars Pathfinder (Reeves 1997) — explain why our design is immune (no shared blocking critical section on hot path).
-   - LMAX Disruptor (Thompson et al.) — drop-oldest precedent.
-   - Tokio scheduling internals.
-   - Wikimedia EventStreams docs.
-4. **System Design** (~1200-1400 w) — six subsections:
-   - 4.1 Workspace architecture (insert module diagram).
-   - 4.2 Zero-copy parsing — `Cow<'a, str>` lifetime contract.
-   - 4.3 Priority scheduling — `biased;` keyword + BinaryHeap; explicit drift definition.
-   - 4.4 `DropOldestRing` algorithm + correctness sketch.
-   - 4.5 Watchdog & FailSafe state machine + hysteresis math.
-   - 4.6 Sync-primitive benchmark methodology (warmup, pinning, sample sizes, 95% CIs).
-5. **Implementation Notes** (~300 w) — only details that move results: parking_lot, CachePadded, non_blocking tracing, dhat allocator-swap.
-6. **Results** (~1200-1400 w) — every figure from P12 referenced with discussion. **Compute Liu&Layland's bound for the measured workload** and contrast with observed deadline-miss rate. State sample size and 95% CI for every quoted percentile.
-7. **Discussion** (~300 w) — when async wins, when it doesn't, false-sharing surprise, AtomicFixedSlots fastest-but-wrong lesson.
-8. **Conclusion + Future Work** (~200 w) — simd-json, work-stealing schedulers, OS-RT thread priorities (`thread_priority` crate, Windows `THREAD_PRIORITY_TIME_CRITICAL`).
-9. **References** — IEEE format, ≥12 sources.
+3. **Related Work** (~350 w | 10%) — **demonstrate theory across all four required pillars**:
+   - **Real-time systems & scheduling:** Liu & Layland (1973) — Rate Monotonic schedulability bound `n(2^(1/n)−1)`. Cite. Apply with measured U in §5. Earliest Deadline First — note Tokio biased select is *static-priority pre-emption (SP-PE)*, not EDF.
+   - **Priority inversion:** Mars Pathfinder (Reeves, 1997) — explain why our design is immune (no shared blocking critical section on hot path; leaderboard updates are mpsc-actor mediated).
+   - **Control theory** (REQUIRED by brief — do not skip): hysteresis-based bang-bang controllers (Schmitt, 1938), dead-band control loops, and how the FailSafe enter/recover thresholds (1.5ms / 0.8ms) form a classical hysteresis loop preventing oscillation. Watchdog timers as the standard fault-detection primitive in safety-critical control (Avizienis et al., 2004 — Basic Concepts and Taxonomy of Dependable Computing).
+   - **Rust concurrency:** Tokio scheduling internals (work-stealing, biased select); `parking_lot` parking-lot algorithm vs OS futex.
+   - **Stream-processing precedents:** LMAX Disruptor (Thompson et al.) — drop-oldest precedent.
+   - **Domain context:** Wikimedia EventStreams docs.
+4. **System Design** (~1200-1400 w | 35%) — six subsections **plus three required diagrams**:
+   - 4.1 Workspace architecture (**Diagram 1: communication / data-flow** — ingest → parser → 2-lane channels → workers → leaderboard actor; arrows labelled with message types).
+   - 4.2 Zero-copy parsing — `Cow<'a, str>` lifetime contract; chunk→Event lifetime as a region.
+   - 4.3 Priority scheduling & IPC — `biased;` keyword (async) + `BinaryHeap<Reverse<(Priority, enqueued_at)>>` (threaded); explicit drift definition `drift = actual_start − enqueued_at`. **(Diagram 2: timing diagram** — task lifecycle: enqueue → wait → start → finish, with the 2ms deadline marker and example Human-preempts-Bot scenario).
+   - 4.4 `DropOldestRing<T>` algorithm + correctness sketch.
+   - 4.5 Watchdog & FailSafe state machine + hysteresis math (**Diagram 3: control-loop / state-machine** — Normal ↔ Degraded with entry threshold 1.5ms p99, recovery threshold 0.8ms p99, 10s hysteresis dwell annotated; arrows labelled with trigger conditions).
+   - 4.6 Sync-primitive benchmark methodology (warmup, CPU pinning, sample sizes, 95% CIs).
+5. **Implementation Notes** (~250 w) — only details that move results: parking_lot vs std::Mutex on Windows, CachePadded for atomics, `tracing_appender::non_blocking`, dhat global-allocator swap.
+6. **Results and Discussion** (~1200-1400 w | 35%) — **single combined section** per brief structure. Each figure introduced, interpreted, and discussed inline:
+   - Fig 1: per-priority drift CDF — interpret the Human-vs-Bot gap as preemption working; sample size + 95% CI.
+   - Fig 2: tail-latency p50/p90/p99/**p99.9** across rates × runtimes — bar chart with error bars.
+   - Fig 3: sync shootout throughput vs thread count — discuss false-sharing surprise; AtomicFixedSlots fastest-but-incorrect lesson.
+   - Fig 4: deadline-miss timeline async-vs-threaded.
+   - Fig 5: dhat zero-copy vs owned-string heap profile — bytes/event delta + `cow_was_borrowed` ratio.
+   - Fig 6: FailSafe state-machine timeline (advanced-feature evaluation; proof of recovery).
+   - Fig 7: overflow drops vs queue capacity (8/64/512/4096).
+   - **Liu & Layland application:** compute U from measured per-task duration × arrival rate; compare to bound; explain observed deadline-miss rate.
+   - **Discussion paragraphs (woven in, not separate):** when async wins / when it doesn't; limitations (Windows scheduler noise, no OS-RT priorities); causes of delays; safety/robustness observations.
+7. **Conclusion and Future Work** (~250 w) — recap the answers to RQ1 + RQ2; future: `simd-json`, work-stealing schedulers, OS-RT thread priorities (`thread_priority` crate, Windows `THREAD_PRIORITY_TIME_CRITICAL`, Linux `SCHED_FIFO`).
+8. **References** (10%) — **APA 7th edition**, ≥12 sources, alphabetical by first author. Suggested core list:
+   - Liu, C. L., & Layland, J. W. (1973). *Scheduling Algorithms for Multiprogramming in a Hard-Real-Time Environment.* JACM.
+   - Reeves, G. E. (1997). *What Really Happened on Mars Rover Pathfinder.* The Risks Digest.
+   - Avizienis, A., Laprie, J.-C., Randell, B., & Landwehr, C. (2004). *Basic Concepts and Taxonomy of Dependable and Secure Computing.* IEEE TDSC.
+   - Sha, L., Rajkumar, R., & Lehoczky, J. P. (1990). *Priority Inheritance Protocols.* IEEE TC.
+   - Thompson, M., et al. (2011). *LMAX Disruptor whitepaper.*
+   - Tokio Authors. (2024). *Tokio Documentation.* https://tokio.rs
+   - Wikimedia Foundation. *EventStreams.* https://wikitech.wikimedia.org/wiki/Event_Platform/EventStreams
+   - The Rust Project. (2024). *The Rust Programming Language.*
+   - Klabnik, S., & Nichols, C. (2023). *The Rust Programming Language* (2nd ed.). No Starch Press.
+   - HdrHistogram Authors. *HdrHistogram: A High Dynamic Range Histogram.* http://hdrhistogram.org
+   - Tene, G. (2015). *How NOT to measure latency.* Strange Loop.
+   - parking_lot Authors. *parking_lot crate documentation.*
+   - (Plus 2-3 more on Rust async / Tokio scheduling internals to hit ≥12.)
 
 **Files:**
-- `docs/research-report/report.tex` (or `report.md` if Markdown is acceptable — confirm with lecturer).
-- `docs/research-report/figures/` (copies of P12 PNGs).
-- `docs/research-report/refs.bib`.
+- `docs/research-report/report.tex` — LaTeX, IEEE/APA-compatible template (e.g., `apa7.cls` or `IEEEtran.cls` with APA bibstyle). Markdown is acceptable only if the lecturer confirms.
+- `docs/research-report/figures/` — copies of P12 PNGs (fig1-fig7) + diagram1-diagram3 (drawio/tikz/svg).
+- `docs/research-report/refs.bib` — BibTeX with `@article`/`@misc` entries; use `apacite` or `biblatex-apa` style.
+- `docs/research-report/diagrams/` — source files (drawio/tikz) for the 3 design diagrams so they're re-editable.
 
 **DONE-WHEN:**
-- [ ] Word count between 3000-4000 (penalised over 4000 per brief).
-- [ ] All 7 figures embedded with captions referencing the data file.
-- [ ] All quoted numbers cite a CSV/hgrm file in `reports/`.
-- [ ] References use consistent IEEE format with 12+ entries.
+- [ ] Word count between **3000-3900** (target 3500; brief penalises over 4000).
+- [ ] **APA 7 referencing** consistent throughout (in-text `(Author, Year)` + reference list).
+- [ ] **Three required design diagrams** present in System Design: communication/data-flow, timing, control-loop/state-machine.
+- [ ] All 7 result figures embedded with captions referencing the data file in `reports/`.
+- [ ] All quoted percentiles state sample size + 95% CI.
+- [ ] **Liu & Layland's bound applied to measured U** and contrasted with observed deadline-miss rate.
+- [ ] Related Work covers all four pillars: Rust, real-time systems, scheduling, **and control** (hysteresis / dependability / watchdog theory).
+- [ ] Results and Discussion is **one combined section**, not split.
+- [ ] Reference list has ≥12 sources, alphabetical by first author, APA format.
 
 ---
 
