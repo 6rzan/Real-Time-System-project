@@ -17,6 +17,7 @@ rts-threaded = { workspace = true }
 [dev-dependencies]
 criterion = { workspace = true }
 parking_lot = { workspace = true }
+crossbeam-channel = { workspace = true }
 crossbeam-utils = { workspace = true }
 dashmap = { workspace = true }
 core_affinity = { workspace = true }
@@ -24,4 +25,8 @@ num_cpus = { workspace = true }
 
 [[bench]]
 name = "placeholder"
+harness = false
+
+[[bench]]
+name = "sync_shootout"
 harness = false

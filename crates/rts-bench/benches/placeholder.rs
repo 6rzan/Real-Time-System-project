@@ -1,7 +1,6 @@
-//! Placeholder bench so `cargo bench -p rts-bench` succeeds during P0.
-//! Real harnesses (`sync_shootout`, `tail_latency`) land in P9 and P10.
+//! Stub bench kept so the `[[bench]] name = "placeholder"` entry compiles.
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 
 fn bench_noop(c: &mut Criterion) {
     c.bench_function("noop", |b| b.iter(|| 1u64.wrapping_add(1)));
