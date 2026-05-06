@@ -11,7 +11,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use rts_core::event::cow_stats;
+use rts_core::failsafe::FailSafeController;
 use rts_core::metrics::Metrics;
+use rts_core::watchdog::WatchdogState;
 
 use crate::ingest::{self, IngestError};
 use crate::leaderboard::{LbCmd, Leaderboard};
@@ -58,15 +60,39 @@ impl Default for PipelineConfig {
 /// Run the full threaded pipeline.
 ///
 /// Returns when ingest finishes.  Prints a metrics + leaderboard summary.
-#[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_lines)]
 pub fn run(cfg: PipelineConfig) -> Result<(), PipelineError> {
     let queue = PriorityQueue::new(cfg.capacity);
     let metrics = Metrics::new();
+    let watchdog = WatchdogState::new();
+    let failsafe = FailSafeController::new();
 
     let (lb_tx, lb_rx) = crossbeam_channel::unbounded::<LbCmd>();
 
     // Spawn the leaderboard actor thread.
     let lb_handle = std::thread::spawn(move || Leaderboard::new(lb_rx).run());
+
+    // Watchdog checker thread.
+    {
+        let wd = Arc::clone(&watchdog);
+        let cancel = Arc::clone(&cfg.cancel);
+        std::thread::spawn(move || {
+            rts_core::watchdog::run_sync_checker(
+                &wd,
+                std::time::Duration::from_secs(5),
+                &cancel,
+            );
+        });
+    }
+
+    // Fail-safe ticker thread.
+    {
+        let fs = Arc::clone(&failsafe);
+        let cancel = Arc::clone(&cfg.cancel);
+        std::thread::spawn(move || {
+            rts_core::failsafe::run_sync_ticker(&fs, &cancel);
+        });
+    }
 
     // Spawn worker threads.
     let mut worker_handles = Vec::new();
@@ -74,19 +100,22 @@ pub fn run(cfg: PipelineConfig) -> Result<(), PipelineError> {
         let q = Arc::clone(&queue);
         let lb = lb_tx.clone();
         let m = Arc::clone(&metrics);
+        let fs = Arc::clone(&failsafe);
         let c = Arc::clone(&cfg.cancel);
         worker_handles.push(std::thread::spawn(move || {
-            scheduler::worker(q, lb, m, c);
+            scheduler::worker(q, lb, m, fs, c);
         }));
     }
 
     // Run ingest on the current thread (blocks until done).
     let q2 = Arc::clone(&queue);
+    let wd2 = Arc::clone(&watchdog);
+    let fs2 = Arc::clone(&failsafe);
     let outcome = ingest::run_sse(
         &cfg.url,
         cfg.limit,
         Arc::clone(&cfg.cancel),
-        move |raw| crate::parser::dispatch(raw, &q2),
+        move |raw| crate::parser::dispatch(raw, &q2, &wd2, &fs2),
     )?;
 
     tracing::info!(target: "rts.threaded.pipeline", outcome = ?outcome, "ingest finished");

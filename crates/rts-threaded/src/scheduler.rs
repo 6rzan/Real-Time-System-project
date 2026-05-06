@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 use parking_lot::{Condvar, Mutex};
 use rts_core::channel::ring::PushOutcome;
 use rts_core::event::OwnedEvent;
+use rts_core::failsafe::FailSafeController;
 use rts_core::metrics::Metrics;
 use rts_core::priority::Priority;
 use rts_core::task::Task;
@@ -189,6 +190,7 @@ pub fn worker(
     queue: Arc<PriorityQueue>,
     lb_tx: crossbeam_channel::Sender<LbCmd>,
     metrics: Arc<Metrics>,
+    failsafe: Arc<FailSafeController>,
     cancel: Arc<AtomicBool>,
 ) {
     while let Some(task) = queue.pop_blocking(&cancel) {
@@ -205,6 +207,7 @@ pub fn worker(
         let drift_ns = u64::try_from(drift.as_nanos()).unwrap_or(u64::MAX);
         let duration_ns = u64::try_from(total.as_nanos()).unwrap_or(u64::MAX);
         metrics.record_jitter(total);
+        failsafe.record_jitter(total);
         let deadline_miss = total.as_nanos() > DEADLINE_NS;
         if deadline_miss {
             metrics.record_deadline_miss(priority);

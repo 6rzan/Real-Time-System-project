@@ -16,13 +16,17 @@
 pub mod channel;
 pub mod error;
 pub mod event;
+pub mod failsafe;
 pub mod metrics;
 pub mod priority;
 pub mod task;
 pub mod time;
+pub mod watchdog;
 
 pub use error::RtsError;
 pub use event::{cow_stats, parse_one, Event, OwnedEvent};
+pub use failsafe::FailSafeController;
 pub use metrics::Metrics;
 pub use priority::Priority;
 pub use task::Task;
+pub use watchdog::WatchdogState;

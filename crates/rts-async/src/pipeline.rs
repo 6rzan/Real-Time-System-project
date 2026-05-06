@@ -11,8 +11,10 @@ use std::sync::Arc;
 
 use rts_core::channel::ring::DropOldestRing;
 use rts_core::event::cow_stats;
+use rts_core::failsafe::FailSafeController;
 use rts_core::metrics::Metrics;
 use rts_core::task::Task;
+use rts_core::watchdog::WatchdogState;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -59,13 +61,55 @@ impl Default for PipelineConfig {
 /// Run the full async pipeline.
 ///
 /// Returns when ingest finishes. Prints a metrics + leaderboard summary.
+#[allow(clippy::too_many_lines)]
 pub async fn run(cfg: PipelineConfig) -> Result<(), PipelineError> {
     let hi = DropOldestRing::<Task>::new(cfg.capacity);
     let lo = DropOldestRing::<Task>::new(cfg.capacity);
     let metrics = Metrics::new();
+    let watchdog = WatchdogState::new();
+    let failsafe = FailSafeController::new();
 
     let (lb_tx, lb_rx) = mpsc::channel::<LbCmd>(1024);
     let lb_handle = tokio::spawn(Leaderboard::new(lb_rx).run());
+
+    // Watchdog checker: warns every 5 s when no events arrive.
+    {
+        let wd = Arc::clone(&watchdog);
+        let cancel = cfg.cancel.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    biased;
+                    () = cancel.cancelled() => break,
+                    () = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
+                        if wd.is_stale() {
+                            tracing::warn!(
+                                target: "rts.watchdog",
+                                "no events received for >10 s — possible upstream stall"
+                            );
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // Fail-safe ticker: advances the rolling jitter window every second.
+    {
+        let fs = Arc::clone(&failsafe);
+        let cancel = cfg.cancel.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tokio::select! {
+                    biased;
+                    () = cancel.cancelled() => break,
+                    _ = interval.tick() => fs.tick(),
+                }
+            }
+        });
+    }
 
     // Spawn worker pool.
     for _ in 0..cfg.workers {
@@ -73,20 +117,23 @@ pub async fn run(cfg: PipelineConfig) -> Result<(), PipelineError> {
         let lo2 = Arc::clone(&lo);
         let lb2 = lb_tx.clone();
         let m2 = Arc::clone(&metrics);
+        let fs2 = Arc::clone(&failsafe);
         let c2 = cfg.cancel.clone();
         tokio::spawn(async move {
-            scheduler::worker(hi2, lo2, lb2, m2, c2).await;
+            scheduler::worker(hi2, lo2, lb2, m2, fs2, c2).await;
         });
     }
 
     // Run ingest (blocks until limit / cancel).
     let hi2 = Arc::clone(&hi);
     let lo2 = Arc::clone(&lo);
+    let wd2 = Arc::clone(&watchdog);
+    let fs2 = Arc::clone(&failsafe);
     let outcome = crate::ingest::run_sse(
         &cfg.url,
         cfg.limit,
         cfg.cancel.clone(),
-        move |raw| crate::parser::dispatch(raw, &hi2, &lo2),
+        move |raw| crate::parser::dispatch(raw, &hi2, &lo2, &wd2, &fs2),
     )
     .await?;
 
@@ -97,11 +144,9 @@ pub async fn run(cfg: PipelineConfig) -> Result<(), PipelineError> {
     cfg.cancel.cancel();
 
     let (snap_tx, snap_rx) = tokio::sync::oneshot::channel();
-    // Best-effort: if the actor already exited, snap_rx will yield Err.
     let _ = lb_tx.send(LbCmd::Snapshot(snap_tx)).await;
-    drop(lb_tx); // close the channel after queuing the snapshot request
+    drop(lb_tx);
 
-    // Wait for actor to finish (processes snapshot then exits).
     lb_handle.await.ok();
 
     // Print leaderboard.
