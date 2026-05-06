@@ -1466,11 +1466,14 @@ dependencies = [
  "crossbeam-channel",
  "crossbeam-utils",
  "dashmap",
+ "dhat",
  "num_cpus",
  "parking_lot",
  "rts-async",
  "rts-core",
  "rts-threaded",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]

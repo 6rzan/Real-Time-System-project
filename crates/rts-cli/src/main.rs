@@ -48,6 +48,12 @@ enum Command {
         #[command(subcommand)]
         cmd: ReplayCmd,
     },
+    /// Inject CPU-busy threads to inflate OS scheduling jitter (demo use).
+    ///
+    /// Spawns `--threads` spin-loop threads for `--duration`.  Run this
+    /// concurrently with a pipeline to drive p99 jitter above the 1.5 ms
+    /// Degraded-Mode threshold.
+    Stress(StressArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -118,6 +124,17 @@ struct RunThreadedArgs {
     /// Produces `<stem>.csv` and `<stem>.hgrm`.
     #[arg(long)]
     metrics_path: Option<PathBuf>,
+}
+
+#[derive(Debug, clap::Args)]
+struct StressArgs {
+    /// How long to run the CPU stress (e.g. `30s`, `1m`).
+    #[arg(long, value_parser = parse_duration, default_value = "30s")]
+    duration: Duration,
+
+    /// Number of spin-loop threads to spawn. Defaults to logical CPU count.
+    #[arg(long)]
+    threads: Option<usize>,
 }
 
 fn parse_rate(raw: &str) -> Result<Rate, String> {
@@ -192,7 +209,7 @@ fn main() -> anyhow::Result<()> {
     let log_path: Option<PathBuf> = match &cli.command {
         Command::RunAsync(args) => args.log_path.clone(),
         Command::RunThreaded(args) => args.log_path.clone(),
-        Command::Replay { .. } => None,
+        Command::Replay { .. } | Command::Stress(_) => None,
     };
     let _tracing_guard = init_tracing(log_path.as_deref());
 
@@ -208,6 +225,7 @@ fn main() -> anyhow::Result<()> {
                 ReplayCmd::Record(args) => replay_record(args).await,
                 ReplayCmd::Play(args) => replay_play(args).await,
             },
+            Command::Stress(args) => run_stress(args).await,
         }
     })
 }
@@ -385,6 +403,37 @@ async fn run_threaded(args: RunThreadedArgs) -> anyhow::Result<()> {
         .await
         .context("threaded pipeline thread panicked")?
         .context("threaded pipeline")
+}
+
+async fn run_stress(args: StressArgs) -> anyhow::Result<()> {
+    let n = args.threads.unwrap_or_else(num_cpus::get);
+    let deadline = std::time::Instant::now() + args.duration;
+
+    println!(
+        "Stress: spinning {} thread(s) for {:.1}s — inflates scheduling jitter",
+        n,
+        args.duration.as_secs_f64()
+    );
+
+    let handles: Vec<_> = (0..n)
+        .map(|_| {
+            std::thread::spawn(move || {
+                while std::time::Instant::now() < deadline {
+                    std::hint::spin_loop();
+                }
+            })
+        })
+        .collect();
+
+    // Yield control back to the async runtime while the threads spin.
+    tokio::time::sleep(args.duration + std::time::Duration::from_millis(100)).await;
+
+    for h in handles {
+        let _ = h.join();
+    }
+
+    println!("Stress: done.");
+    Ok(())
 }
 
 fn install_ctrl_c(cancel: &CancellationToken) {
