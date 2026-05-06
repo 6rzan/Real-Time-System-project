@@ -22,6 +22,8 @@ crossbeam-utils = { workspace = true }
 dashmap = { workspace = true }
 core_affinity = { workspace = true }
 num_cpus = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio-util = { workspace = true, features = ["rt"] }
 
 [[bench]]
 name = "placeholder"
@@ -29,4 +31,8 @@ harness = false
 
 [[bench]]
 name = "sync_shootout"
+harness = false
+
+[[bench]]
+name = "tail_latency"
 harness = false
