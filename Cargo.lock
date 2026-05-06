@@ -1463,6 +1463,7 @@ version = "0.1.0"
 dependencies = [
  "core_affinity",
  "criterion",
+ "crossbeam-channel",
  "crossbeam-utils",
  "dashmap",
  "num_cpus",
