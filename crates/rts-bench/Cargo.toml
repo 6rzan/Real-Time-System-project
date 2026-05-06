@@ -13,6 +13,14 @@ publish = false
 rts-core = { workspace = true }
 rts-async = { workspace = true }
 rts-threaded = { workspace = true }
+dhat = { workspace = true, optional = true }
+
+[features]
+default = []
+# Swap the global allocator for dhat's heap-profiling allocator.
+dhat-heap = ["dep:dhat"]
+# Force rts-core to take the all-allocating parser path (for comparison).
+owned-baseline = ["rts-core/owned-baseline"]
 
 [dev-dependencies]
 criterion = { workspace = true }
