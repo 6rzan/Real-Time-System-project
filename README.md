@@ -63,6 +63,28 @@ cargo --version     # should print  cargo 1.94.x  or newer
 If `rustc` is not found after reopening, add `%USERPROFILE%\.cargo\bin` to your Windows PATH
 (Settings → System → Advanced system settings → Environment Variables → Path → New).
 
+### 1b. MSVC Build Tools (Windows — required for the linker)
+
+Rust on Windows needs the Microsoft C++ linker (`link.exe`). VS Code is **not** enough — you need the actual build tools.
+
+**Option A (recommended — smaller download, ~5 GB):**
+
+1. Go to: https://visualstudio.microsoft.com/visual-cpp-build-tools/
+2. Click **Download Build Tools**
+3. Run the installer
+4. In the installer, check **"Desktop development with C++"** then click Install
+5. Wait for it to finish (~5–10 min), then **reboot**
+
+**Option B — via winget:**
+
+```powershell
+winget install Microsoft.VisualStudio.2022.BuildTools
+# After install completes, reboot, then verify:
+where link.exe    # should print a path like C:\Program Files (x86)\Microsoft Visual Studio\...
+```
+
+After rebooting, run `cargo build --workspace --release` again — the linker error will be gone.
+
 ### 2. Git
 
 ```powershell
