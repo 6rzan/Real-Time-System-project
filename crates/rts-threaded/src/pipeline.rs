@@ -6,6 +6,7 @@
 //! duration), then signals workers, drains the leaderboard, and prints a
 //! shutdown summary to stdout.
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -35,6 +36,8 @@ pub struct PipelineConfig {
     pub capacity: usize,
     /// Set to `true` to signal cancellation from outside (Ctrl-C / timer).
     pub cancel: Arc<AtomicBool>,
+    /// If set, dump `<stem>_threaded.csv` and `<stem>_threaded.hgrm` on shutdown.
+    pub metrics_path: Option<PathBuf>,
 }
 
 impl Default for PipelineConfig {
@@ -47,6 +50,7 @@ impl Default for PipelineConfig {
             workers,
             capacity: 256,
             cancel: Arc::new(AtomicBool::new(false)),
+            metrics_path: None,
         }
     }
 }
@@ -146,6 +150,23 @@ pub fn run(cfg: PipelineConfig) -> Result<(), PipelineError> {
     let total = borrowed + owned;
     let pct = if total > 0 { (borrowed * 100) / total } else { 0 };
     println!("Cow stats: borrowed={borrowed}  owned={owned}  ({pct}% borrowed)");
+
+    // ── Dump metrics files ───────────────────────────────────────────────────
+    if let Some(stem) = cfg.metrics_path {
+        if let Some(parent) = stem.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        let csv_path = stem.with_extension("csv");
+        let hgrm_path = stem.with_extension("hgrm");
+        match metrics.dump_csv(&csv_path) {
+            Ok(()) => println!("Metrics CSV: {}", csv_path.display()),
+            Err(e) => tracing::warn!(target: "rts.threaded.pipeline", error = %e, "CSV dump failed"),
+        }
+        match metrics.dump_hgrm(&hgrm_path) {
+            Ok(()) => println!("Metrics HGRM: {}", hgrm_path.display()),
+            Err(e) => tracing::warn!(target: "rts.threaded.pipeline", error = %e, "HGRM dump failed"),
+        }
+    }
 
     Ok(())
 }

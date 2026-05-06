@@ -113,6 +113,11 @@ struct RunThreadedArgs {
     /// Write per-event NDJSON logs to this file (creates parent dirs).
     #[arg(long)]
     log_path: Option<PathBuf>,
+
+    /// Stem path for metrics dump on shutdown (e.g. `reports/csv/run1_threaded`).
+    /// Produces `<stem>.csv` and `<stem>.hgrm`.
+    #[arg(long)]
+    metrics_path: Option<PathBuf>,
 }
 
 fn parse_rate(raw: &str) -> Result<Rate, String> {
@@ -145,6 +150,11 @@ struct RunAsyncArgs {
     /// Example: `reports/runs/async_run.ndjson`
     #[arg(long)]
     log_path: Option<PathBuf>,
+
+    /// Stem path for metrics dump on shutdown (e.g. `reports/csv/run1_async`).
+    /// Produces `<stem>.csv` and `<stem>.hgrm`.
+    #[arg(long)]
+    metrics_path: Option<PathBuf>,
 }
 
 fn parse_duration(raw: &str) -> Result<Duration, String> {
@@ -285,6 +295,7 @@ async fn run_async(args: RunAsyncArgs) -> anyhow::Result<()> {
         workers,
         capacity: args.capacity,
         cancel,
+        metrics_path: args.metrics_path,
     };
 
     rts_async::pipeline::run(cfg)
@@ -366,6 +377,7 @@ async fn run_threaded(args: RunThreadedArgs) -> anyhow::Result<()> {
         workers,
         capacity: args.capacity,
         cancel,
+        metrics_path: args.metrics_path,
     };
 
     // Run the blocking pipeline on a dedicated thread so we don't block Tokio.

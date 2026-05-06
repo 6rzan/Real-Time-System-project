@@ -3,9 +3,6 @@
 //! `Metrics` is shared between all workers via `Arc`. Histograms are guarded
 //! by `parking_lot::Mutex`; counters use `AtomicU64` (relaxed ordering is fine
 //! because we only need eventual consistency for reporting).
-//!
-//! Full CSV / `.hgrm` dump functionality is completed in P7; this module
-//! provides the snapshot path needed by the P5 pipeline.
 
 use std::io::Write as _;
 use std::path::Path;
@@ -13,6 +10,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use hdrhistogram::serialization::interval_log::IntervalLogWriterBuilder;
+use hdrhistogram::serialization::V2Serializer;
 use hdrhistogram::Histogram;
 use parking_lot::Mutex;
 
@@ -134,8 +133,6 @@ impl Metrics {
     }
 
     /// Dump per-priority percentile rows to a CSV file.
-    ///
-    /// Full `.hgrm` export is added in P7; this stub writes the snapshot rows.
     pub fn dump_csv(&self, path: &Path) -> std::io::Result<()> {
         let snap = self.snapshot();
         let mut f = std::fs::File::create(path)?;
@@ -167,6 +164,38 @@ impl Metrics {
             snap.jitter_p999,
             snap.sample_count_human + snap.sample_count_bot
         )?;
+        Ok(())
+    }
+
+    /// Dump all three histograms in `HdrHistogram` interval-log format (`.hgrm`).
+    ///
+    /// Each histogram is written as a single interval entry tagged with its
+    /// name.  The output is compatible with `HdrHistogram/HdrLogProcessing`
+    /// and similar analysis tools.
+    pub fn dump_hgrm(&self, path: &Path) -> std::io::Result<()> {
+        let dh = self.drift_human.lock();
+        let db = self.drift_bot.lock();
+        let j = self.jitter.lock();
+
+        let mut f = std::fs::File::create(path)?;
+        let mut serializer = V2Serializer::new();
+
+        let mut writer = IntervalLogWriterBuilder::new()
+            .add_comment("RTS2601 latency histograms — nanoseconds")
+            .add_comment("Tracks: drift_human, drift_bot, jitter")
+            .begin_log_with(&mut f, &mut serializer)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+
+        writer
+            .write_histogram(&dh, std::time::Duration::ZERO, std::time::Duration::from_secs(0), None)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        writer
+            .write_histogram(&db, std::time::Duration::from_secs(1), std::time::Duration::from_secs(0), None)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        writer
+            .write_histogram(&j, std::time::Duration::from_secs(2), std::time::Duration::from_secs(0), None)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+
         Ok(())
     }
 }
