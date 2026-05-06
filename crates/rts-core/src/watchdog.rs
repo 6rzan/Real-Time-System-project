@@ -42,9 +42,15 @@ impl WatchdogState {
     /// `STALE_NS` nanoseconds.
     #[must_use]
     pub fn is_stale(&self) -> bool {
+        self.is_stale_ns(STALE_NS)
+    }
+
+    /// Same as `is_stale` but with a caller-supplied threshold (for tests).
+    #[must_use]
+    pub(crate) fn is_stale_ns(&self, threshold_ns: u64) -> bool {
         let now = crate::time::now_ns();
         let last = self.last_ns.load(Ordering::Relaxed);
-        now.saturating_sub(last) > STALE_NS
+        now.saturating_sub(last) > threshold_ns
     }
 
     /// Reset the heartbeat to now (use after an intentional pipeline pause).
@@ -88,20 +94,24 @@ mod tests {
 
     #[test]
     fn stale_after_backdating() {
+        // now_ns() counts from process start — only ms in a fresh test process.
+        // Store 0 and use a 1 µs threshold: elapsed = now_ns() which is always
+        // several milliseconds, so this is reliably > 1_000 ns.
         let w = WatchdogState::new();
-        // Backdate by 11 seconds.
-        let old = crate::time::now_ns().saturating_sub(11_000_000_000);
-        w.last_ns.store(old, Ordering::Relaxed);
-        assert!(w.is_stale());
+        w.last_ns.store(0, Ordering::Relaxed);
+        assert!(w.is_stale_ns(1_000));
     }
 
     #[test]
     fn touch_resets_stale() {
         let w = WatchdogState::new();
-        let old = crate::time::now_ns().saturating_sub(11_000_000_000);
-        w.last_ns.store(old, Ordering::Relaxed);
-        assert!(w.is_stale());
+        // Mark stale by setting last_ns to 0.
+        w.last_ns.store(0, Ordering::Relaxed);
+        assert!(w.is_stale_ns(1_000));
+        // After touch(), last_ns = now_ns(). Check staleness with a 1-second
+        // threshold — the time between touch() and is_stale_ns() is nanoseconds,
+        // nowhere near 1 second.
         w.touch();
-        assert!(!w.is_stale());
+        assert!(!w.is_stale_ns(1_000_000_000));
     }
 }
