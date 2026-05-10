@@ -138,7 +138,7 @@ pip install matplotlib numpy hdrh
 ## Clone and Build
 
 ```bash
-git clone <repository-url> rts2601
+git clone https://github.com/6rzan/Real-Time-System-project rts2601
 cd rts2601
 cargo build --workspace --release
 ```
