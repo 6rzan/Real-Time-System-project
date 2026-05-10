@@ -64,7 +64,9 @@ def load_shootout_data(criterion_dir: Path) -> dict[str, dict[int, float]]:
                 threads = int(param_dir.name)
             except ValueError:
                 continue
-            est_path = param_dir / "estimates.json"
+            est_path = param_dir / "new" / "estimates.json"
+            if not est_path.exists():
+                est_path = param_dir / "estimates.json"
             if not est_path.exists():
                 continue
             try:

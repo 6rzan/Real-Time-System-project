@@ -94,23 +94,22 @@ mod tests {
 
     #[test]
     fn stale_after_backdating() {
-        // now_ns() counts from process start — only ms in a fresh test process.
-        // Store 0 and use a 1 µs threshold: elapsed = now_ns() which is always
-        // several milliseconds, so this is reliably > 1_000 ns.
+        // Sleep so now_ns() is guaranteed to be well above the threshold,
+        // regardless of when the OnceLock START was initialized.
         let w = WatchdogState::new();
         w.last_ns.store(0, Ordering::Relaxed);
+        std::thread::sleep(std::time::Duration::from_millis(2));
         assert!(w.is_stale_ns(1_000));
     }
 
     #[test]
     fn touch_resets_stale() {
         let w = WatchdogState::new();
-        // Mark stale by setting last_ns to 0.
         w.last_ns.store(0, Ordering::Relaxed);
+        std::thread::sleep(std::time::Duration::from_millis(2));
         assert!(w.is_stale_ns(1_000));
-        // After touch(), last_ns = now_ns(). Check staleness with a 1-second
-        // threshold — the time between touch() and is_stale_ns() is nanoseconds,
-        // nowhere near 1 second.
+        // After touch(), last_ns = now_ns(). Check with a 1 s threshold —
+        // the gap between touch() and is_stale_ns() is nanoseconds.
         w.touch();
         assert!(!w.is_stale_ns(1_000_000_000));
     }

@@ -1,309 +1,193 @@
 # RTS2601 — Real-Time Wikipedia SSE Pipeline
 
-A high-pressure real-time data ingestion + analytics pipeline in **Rust** consuming the live Wikipedia *Recent Changes* SSE firehose
-(`https://stream.wikimedia.org/v2/stream/recentchange`). Built for the **CT087-3-3-RTS** assignment.
+A high-pressure real-time data ingestion and analytics pipeline in **Rust**, consuming the live Wikipedia _Recent Changes_ SSE firehose
+(`https://stream.wikimedia.org/v2/stream/recentchange`).
 
 The system implements the same pipeline twice — once with **Tokio async/await**, once with **`std::thread`** — and benchmarks them
 head-to-head on tail latency, scheduling drift, jitter, and synchronisation throughput.
+
+Built for module **CT087-3-3-RTS** (Real-Time Systems).
 
 ---
 
 ## Table of Contents
 
 1. [Features](#features)
-2. [Prerequisites — install these first](#prerequisites)
-3. [Getting the code onto your machine](#getting-the-code)
-4. [Building the project](#building)
-5. [Running the tests](#tests)
-6. [Running the pipeline (Windows PowerShell)](#running-on-windows)
-7. [Running the pipeline (WSL / Linux)](#running-on-wsl)
-8. [Running the benchmarks](#benchmarks)
-9. [Heap profiling (zero-copy proof)](#heap-profiling)
-10. [Generating plots](#plots)
-11. [Running the demo script](#demo)
-12. [Workspace layout](#workspace-layout)
-13. [Troubleshooting](#troubleshooting)
+2. [Repository Layout](#repository-layout)
+3. [Prerequisites](#prerequisites)
+4. [Clone and Build](#clone-and-build)
+5. [Running the Tests](#running-the-tests)
+6. [Running the Pipeline](#running-the-pipeline)
+7. [Running the Benchmarks](#running-the-benchmarks)
+8. [Heap Profiling — Zero-Copy Proof](#heap-profiling--zero-copy-proof)
+9. [Generating Plots](#generating-plots)
+10. [Demo Script](#demo-script)
+11. [Mapping to the Assignment Brief](#mapping-to-the-assignment-brief)
+12. [Troubleshooting](#troubleshooting)
+13. [License](#license)
 
 ---
 
 ## Features
 
 - **Dual-runtime pipelines**: Tokio (`rts-async`) and `std::thread` (`rts-threaded`) sharing the same core types and metrics.
-- **Zero-copy parsing**: `serde` with `Cow<'a, str>` lifetimes; allocations only at the priority-queue boundary. Heap profile vs. an owned-string baseline proves the saving via `dhat-rs`.
-- **Priority scheduling**: `bot:true` events are low priority; human edits preempt via biased `tokio::select!` (async) or a `BinaryHeap<(Priority, Instant)>` (threaded).
-- **Drop-oldest backpressure**: bounded ring with a high-precision timestamped *Overflow Event* per drop.
+- **Zero-copy parsing**: `serde` with `Cow<'a, str>` lifetimes; allocations only at the priority-queue boundary. A `dhat-rs` heap profile vs. an owned-string baseline proves the saving.
+- **Priority scheduling**: `bot:true` events are low priority; human edits preempt via biased `tokio::select!` (async) or a `BinaryHeap<(Priority, Instant)>` (threaded). Scheduling drift is measured per-event.
+- **Drop-oldest backpressure**: bounded ring buffer with a high-precision timestamped _Overflow Event_ per drop.
 - **Watchdog**: triggers a network reset after 10 s of silence.
 - **Fail-Safe / Degraded Mode**: sliding-window p99 jitter trip with hysteresis recovery.
 - **Sync-primitive shootout**: Criterion benches comparing `parking_lot::Mutex`, `std::sync::Mutex`, `RwLock`, `DashMap`, and cache-padded atomics across 1–16 threads.
-- **Statistical rigour**: HdrHistogram p50/p90/p99/p99.9 with sample sizes and 95% CIs.
+- **Statistical rigour**: HdrHistogram p50 / p90 / p99 / p99.9 with sample sizes and 95 % confidence intervals.
+
+---
+
+## Repository Layout
+
+```
+Cargo.toml                     # workspace root — 6 member crates
+rust-toolchain.toml            # pins Rust stable channel
+.cargo/config.toml             # release profile: lto=thin, opt-level=3
+crates/
+  rts-core/                    # shared types, Cow parser, DropOldestRing,
+                               #   HdrHistogram metrics, FailSafeController
+  rts-async/                   # Tokio: ingest, biased-select scheduler,
+                               #   leaderboard actor, pipeline orchestrator
+  rts-threaded/                # std::thread: blocking ingest, BinaryHeap
+                               #   priority queue, worker pool
+  rts-bench/                   # Criterion harnesses
+  rts-cli/                     # clap entry point — all subcommands
+  rts-replay/                  # axum SSE server for fixture replay
+fixtures/
+  recentchange-60s.ndjson      # 3 078 real Wikipedia events (pre-recorded)
+scripts/
+  demo.ps1 / demo.sh           # end-to-end demo
+  plot_latency.py              # tail-latency CDF plot
+  plot_shootout.py             # sync-shootout throughput plot
+reports/
+  runs/   csv/   plots/   dhat/   # results land here
+docs/research-report/
+```
 
 ---
 
 ## Prerequisites
 
-Install every item in this section before touching any code. Do them in order.
+You need Rust, Git, and (optionally) Python for plots. Everything else is pulled in by `cargo`.
 
-### 1. Rust toolchain
+### Rust toolchain
 
-Open **PowerShell** (Windows) or a terminal (Linux/WSL) and run:
+Install via [rustup](https://rustup.rs):
 
-```powershell
-# Windows PowerShell / WSL both:
-winget install Rustlang.Rustup          # Windows only — skip on WSL/Linux
-# OR visit https://rustup.rs and run the installer shown there
+```bash
+# Linux / macOS / WSL:
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
 ```
 
-After the installer finishes, **close and reopen your terminal**, then verify:
-
 ```powershell
-rustc --version     # should print  rustc 1.94.x  or newer
-cargo --version     # should print  cargo 1.94.x  or newer
+# Windows PowerShell:
+winget install Rustlang.Rustup
 ```
 
-If `rustc` is not found after reopening, add `%USERPROFILE%\.cargo\bin` to your Windows PATH
-(Settings → System → Advanced system settings → Environment Variables → Path → New).
+Verify (any platform):
 
-### 1b. MSVC Build Tools (Windows — required for the linker)
+```bash
+rustc --version    # 1.94 or newer recommended
+cargo --version
+```
 
-Rust on Windows needs the Microsoft C++ linker (`link.exe`). VS Code is **not** enough — you need the actual build tools.
+The repository pins the toolchain via `rust-toolchain.toml`, so the correct channel is selected automatically.
 
-**Option A (recommended — smaller download, ~5 GB):**
+### Windows — MSVC Build Tools
 
-1. Go to: https://visualstudio.microsoft.com/visual-cpp-build-tools/
-2. Click **Download Build Tools**
-3. Run the installer
-4. In the installer, check **"Desktop development with C++"** then click Install
-5. Wait for it to finish (~5–10 min), then **reboot**
+Rust on Windows needs the Microsoft C++ linker (`link.exe`).
 
-**Option B — via winget:**
+1. Download from https://visualstudio.microsoft.com/visual-cpp-build-tools/
+2. In the installer, tick **"Desktop development with C++"** and install.
+3. Reboot.
+
+Or via winget:
 
 ```powershell
 winget install Microsoft.VisualStudio.2022.BuildTools
-# After install completes, reboot, then verify:
-where link.exe    # should print a path like C:\Program Files (x86)\Microsoft Visual Studio\...
 ```
 
-After rebooting, run `cargo build --workspace --release` again — the linker error will be gone.
-
-### 2. Git
-
-```powershell
-winget install Git.Git      # Windows
-# WSL/Ubuntu:
-sudo apt update && sudo apt install git -y
-```
-
-Verify: `git --version`
-
-### 3. Python 3.9+ (for plots only)
-
-```powershell
-winget install Python.Python.3.12    # Windows
-# WSL/Ubuntu:
-sudo apt install python3 python3-pip -y
-```
-
-Then install the plotting libraries:
-
-```powershell
-pip install matplotlib numpy hdrh     # same command on Windows and WSL
-```
-
-### 4. WSL 2 (Windows only — needed for canonical benchmarks)
-
-WSL is optional for running the pipeline but **required** if you want clean benchmark numbers (Windows adds scheduler noise). Skip this if you only want to run the code on Windows.
-
-Open PowerShell **as Administrator**:
-
-```powershell
-wsl --install           # installs WSL2 + Ubuntu automatically
-# Reboot when prompted
-```
-
-After rebooting, open the **Ubuntu** app from the Start menu, create your Linux username/password, then install Rust inside WSL exactly as above:
+### Linux — system packages
 
 ```bash
-# Inside WSL Ubuntu terminal:
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-# Press 1 (default install), then:
-source "$HOME/.cargo/env"
-rustc --version
+sudo apt update
+sudo apt install -y build-essential pkg-config libssl-dev git
+```
+
+### macOS — Xcode CLT
+
+```bash
+xcode-select --install
+```
+
+### Python (only needed for plots)
+
+Python ≥ 3.9, plus three packages:
+
+```bash
+pip install matplotlib numpy hdrh
 ```
 
 ---
 
-## Getting the Code
-
-### If you already have the folder on your desktop (most likely)
-
-Open PowerShell and navigate to it:
-
-```powershell
-cd "$env:USERPROFILE\Desktop\UNI\Real Time System"
-```
-
-Verify you're in the right place:
-
-```powershell
-ls Cargo.toml     # should print the file — you're good
-```
-
-### If you need to clone from GitHub
-
-```powershell
-cd "$env:USERPROFILE\Desktop\UNI"
-git clone <your-repo-url> "Real Time System"
-cd "Real Time System"
-```
-
-### Opening the same folder in WSL
-
-WSL can access your Windows files under `/mnt/c/`. Your project is at:
+## Clone and Build
 
 ```bash
-# Inside WSL terminal:
-cd "/mnt/c/Users/$USER/Desktop/UNI/Real Time System"
-# OR use your Windows username explicitly:
-cd "/mnt/c/Users/tahaf/Desktop/UNI/Real Time System"
-```
-
----
-
-## Building
-
-Run this once to compile everything. It takes 2–5 minutes the first time (downloading + compiling ~80 dependencies). Subsequent builds are seconds.
-
-```powershell
-# Windows PowerShell  OR  WSL terminal — same command:
+git clone <repository-url> rts2601
+cd rts2601
 cargo build --workspace --release
 ```
 
-You should see a long list of `Compiling ...` lines ending with:
+First build takes 2–5 minutes (downloading and compiling ~80 dependencies). Subsequent builds are seconds.
 
-```
-Finished `release` profile [optimized] target(s) in Xs
-```
-
-If you see any red `error[...]` lines, jump to [Troubleshooting](#troubleshooting).
-
-**What `--release` means:** without it, the binary is 10–100× slower and benchmark numbers will be wrong. Always use `--release` for anything other than iterating on code.
+Always use `--release`. The debug binary is 10–100× slower and benchmark numbers will be wrong.
 
 ---
 
-## Tests
+## Running the Tests
 
-Run the full test suite to verify everything is wired up correctly:
-
-```powershell
+```bash
 cargo test --workspace --release
 ```
 
-Expected output ends with something like:
+Style and lint checks (CI runs these too):
 
-```
-test result: ok. 42 passed; 0 failed; 0 ignored
-```
-
-Also check code style (CI will fail if these fail):
-
-```powershell
-cargo fmt --check                                      # formatting
-cargo clippy --workspace --all-targets -- -D warnings  # linting
+```bash
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 ---
 
-## Running on Windows
+## Running the Pipeline
 
-All commands below are run from inside the project folder in **PowerShell**:
+The CLI binary is `rts` (built into `./target/release/rts`). All examples below assume you are in the project root.
 
-```powershell
-cd "$env:USERPROFILE\Desktop\UNI\Real Time System"
-```
+There are two ways to drive the pipeline: against the **live** Wikimedia stream, or against a **local replay** of a pre-recorded fixture (deterministic, no network needed).
 
-### Option A — Live Wikipedia stream (requires internet)
+### Option A — Live Wikimedia stream
 
-This connects to the real Wikimedia SSE endpoint and processes events for 60 seconds.
-
-**Async pipeline:**
-```powershell
+```bash
+# Async pipeline:
 cargo run --release -p rts-cli -- run-async --duration 60s
-```
 
-**Threaded pipeline:**
-```powershell
+# Threaded pipeline:
 cargo run --release -p rts-cli -- run-threaded --duration 60s
 ```
 
-You will see JSON log lines printed to the terminal. Press `Ctrl+C` to stop early.
+`Ctrl+C` stops it early.
 
-### Option B — Local replay (recommended — no internet needed)
+### Option B — Local replay (recommended)
 
-This uses the pre-recorded fixture file (`fixtures/recentchange-60s.ndjson`) so results are deterministic and network problems cannot affect you.
+The fixture `fixtures/recentchange-60s.ndjson` contains 3 078 real Wikipedia events. Replay makes runs reproducible and works without internet.
 
-**Step 1 — Open a first PowerShell window and start the replay server:**
+**Terminal 1 — replay server:**
 
-```powershell
-cd "$env:USERPROFILE\Desktop\UNI\Real Time System"
-cargo run --release -p rts-cli -- replay play `
-    --fixture fixtures/recentchange-60s.ndjson `
-    --rate 10x `
-    --port 8080
-```
-
-Leave this window running. It will print `Replay server listening on 127.0.0.1:8080`.
-
-**Step 2 — Open a second PowerShell window and run the pipeline:**
-
-```powershell
-cd "$env:USERPROFILE\Desktop\UNI\Real Time System"
-
-# Async:
-cargo run --release -p rts-cli -- run-async `
-    --url http://127.0.0.1:8080/v2/stream/recentchange `
-    --duration 60s `
-    --log-path reports/runs/async_replay.ndjson
-
-# Threaded (run after async finishes):
-cargo run --release -p rts-cli -- run-threaded `
-    --url http://127.0.0.1:8080/v2/stream/recentchange `
-    --duration 60s `
-    --log-path reports/runs/threaded_replay.ndjson
-```
-
-When done, go back to the first window and press `Ctrl+C` to stop the replay server.
-
-### Saving logs to a file
-
-Add `--log-path` to write the NDJSON event log to disk (used later for plots):
-
-```powershell
-cargo run --release -p rts-cli -- run-async `
-    --url http://127.0.0.1:8080/v2/stream/recentchange `
-    --duration 60s `
-    --log-path reports/runs/async_run1.ndjson `
-    --metrics-path reports/csv/async_run1
-```
-
----
-
-## Running on WSL
-
-Open the **Ubuntu** (WSL) terminal. Navigate to the project:
-
-```bash
-cd "/mnt/c/Users/tahaf/Desktop/UNI/Real Time System"
-```
-
-Build (first time only — WSL has its own `target/` cache):
-
-```bash
-cargo build --workspace --release
-```
-
-### Replay server + pipeline (two terminals)
-
-**WSL terminal 1 — replay server:**
 ```bash
 cargo run --release -p rts-cli -- replay play \
     --fixture fixtures/recentchange-60s.ndjson \
@@ -311,48 +195,75 @@ cargo run --release -p rts-cli -- replay play \
     --port 8080
 ```
 
-**WSL terminal 2 — pipeline:**
+The server prints `Replay server listening on 127.0.0.1:8080`. Leave it running.
+
+**Terminal 2 — run a pipeline against the replay:**
+
 ```bash
+# Async:
 cargo run --release -p rts-cli -- run-async \
     --url http://127.0.0.1:8080/v2/stream/recentchange \
     --duration 60s \
-    --log-path reports/runs/async_wsl.ndjson
+    --log-path reports/runs/async_replay.ndjson \
+    --metrics-path reports/csv/async_replay
 
+# Threaded:
 cargo run --release -p rts-cli -- run-threaded \
     --url http://127.0.0.1:8080/v2/stream/recentchange \
     --duration 60s \
-    --log-path reports/runs/threaded_wsl.ndjson
+    --log-path reports/runs/threaded_replay.ndjson \
+    --metrics-path reports/csv/threaded_replay
 ```
 
-**Why WSL for benchmarks?** The Windows NT scheduler adds ~50–200 µs of noise per context switch. WSL2 runs a real Linux kernel, so benchmark numbers are more stable and match what the report's methodology section describes.
+`--rate` accepts `1x`, `10x`, `100x`, or `max` (no inter-event delay).
+
+### Recording a fresh fixture
+
+```bash
+cargo run --release -p rts-cli -- replay record \
+    --duration 60s \
+    --out fixtures/my_recording.ndjson
+```
+
+### CLI reference
+
+```
+rts run-async       [--url URL] [--duration 60s] [--log-path PATH] [--metrics-path PATH]
+rts run-threaded    [--url URL] [--duration 60s] [--log-path PATH] [--metrics-path PATH]
+rts replay record   --duration 60s --out PATH
+rts replay play     --fixture PATH [--rate 1x|10x|100x|max] [--port 8080]
+rts stress          (multiplier sweep — see scripts/demo.sh)
+```
 
 ---
 
-## Benchmarks
+## Running the Benchmarks
 
-Benchmarks take **10–15 minutes** each. Run them in WSL for canonical numbers.
+Benchmarks take 10–15 minutes each. For canonical numbers run them on Linux or WSL — the Windows scheduler adds 50–200 µs of context-switch noise.
 
-### Sync-primitive shootout (5 variants × 5 thread counts)
+### Sync-primitive shootout
 
 ```bash
 cargo bench -p rts-bench --bench sync_shootout
 ```
 
-Results go to:
-- `target/criterion/` — HTML report (open `target/criterion/std_mutex/report/index.html` in a browser)
-- `reports/csv/sync_shootout.csv` — raw numbers for the plots
+Outputs:
 
-### Tail-latency comparison (async vs. threaded, 3 batch sizes)
+- `target/criterion/` — HTML report (open `target/criterion/<group>/report/index.html`)
+- `reports/csv/sync_shootout.csv` — raw numbers for plotting
+
+### Tail-latency comparison (async vs threaded)
 
 ```bash
 cargo bench -p rts-bench --bench tail_latency
 ```
 
-Results go to:
-- `target/criterion/` — HTML report
-- `reports/csv/tail_latency.csv` — p50/p90/p99/p99.9 per runtime × batch size
+Outputs:
 
-### Quick sanity check (30 seconds instead of 15 minutes)
+- `target/criterion/` — HTML report
+- `reports/csv/tail_latency.csv` — p50 / p90 / p99 / p99.9 per runtime × batch size
+
+### Quick sanity check (~30 s instead of 15 min)
 
 ```bash
 cargo bench -p rts-bench --bench sync_shootout -- --warm-up-time 1 --sample-size 10
@@ -360,133 +271,88 @@ cargo bench -p rts-bench --bench sync_shootout -- --warm-up-time 1 --sample-size
 
 ---
 
-## Heap Profiling
+## Heap Profiling — Zero-Copy Proof
 
-This proves the zero-copy saving by comparing two builds: one with `Cow<'a, str>` (default) and one that forces `.to_string()` on every field (baseline).
+The `dhat-heap` feature compiles in a heap profiler. Comparing two runs proves the `Cow<'a, str>` saving:
 
-**Make sure the replay server is running in another terminal first** (see [Option B](#option-b----local-replay-recommended----no-internet-needed) above).
+1. **Zero-copy build** (default `Cow` parsing).
+2. **Owned-string baseline** (the `owned-baseline` feature forces `.to_string()` on every field).
 
-### Run 1 — Zero-copy build:
+Run the replay server in another terminal first, then:
 
-```powershell
-# Windows PowerShell:
-cargo run --release --features dhat-heap -p rts-cli -- run-async `
-    --url http://127.0.0.1:8080/v2/stream/recentchange `
+```bash
+# Run 1 — zero-copy:
+cargo run --release --features dhat-heap -p rts-cli -- run-async \
+    --url http://127.0.0.1:8080/v2/stream/recentchange \
     --duration 60s
-```
+mv dhat-heap.json reports/dhat/zero_copy.json
 
-This produces `dhat-heap.json` in the project root. Move it:
-
-```powershell
-Move-Item dhat-heap.json reports/dhat/zero_copy.json
-```
-
-### Run 2 — Owned-string baseline:
-
-```powershell
-cargo run --release --features "dhat-heap,owned-baseline" -p rts-cli -- run-async `
-    --url http://127.0.0.1:8080/v2/stream/recentchange `
+# Run 2 — owned baseline:
+cargo run --release --features "dhat-heap,owned-baseline" -p rts-cli -- run-async \
+    --url http://127.0.0.1:8080/v2/stream/recentchange \
     --duration 60s
-Move-Item dhat-heap.json reports/dhat/owned_baseline.json
+mv dhat-heap.json reports/dhat/owned_baseline.json
 ```
 
-### Viewing the results
+Open both JSON files in the [dhat viewer](https://nnethercote.github.io/dh_view/dh_view.html) (drag and drop) and compare `total_bytes`. Zero-copy is roughly 60× smaller on the parser hot path.
 
-Open both JSON files in the [dhat viewer](https://nnethercote.github.io/dh_view/dh_view.html) (drag and drop). Compare `total_bytes` — zero-copy should be ~60× smaller.
+The pipeline also exposes a runtime borrowed/owned counter via `rts_core::event::cow_stats()` — Wikipedia's mostly-ASCII payload yields > 99 % borrowed parses.
 
 ---
 
-## Plots
+## Generating Plots
 
-**Prerequisites:** Python 3 + matplotlib + numpy + hdrh installed (see [Prerequisites](#prerequisites)).
+After running the pipeline / benchmarks so that CSVs exist under `reports/csv/`:
 
-Make sure you have run the pipeline and benchmarks first so the CSV files exist under `reports/csv/`.
-
-```powershell
-# Windows PowerShell:
+```bash
 python scripts/plot_latency.py
 python scripts/plot_shootout.py
 ```
 
-```bash
-# WSL:
-python3 scripts/plot_latency.py
-python3 scripts/plot_shootout.py
-```
-
-Output PNGs land in `reports/plots/`.
+PNGs land in `reports/plots/`.
 
 ---
 
-## Demo
+## Demo Script
 
-The demo script runs the entire pipeline end-to-end in ~5 minutes using only the local replay server (no internet needed). It shows:
+The demo runs everything end-to-end in ~5 minutes using only the local replay (no internet). It shows:
 
-1. Async pipeline running under 10× burst load
-2. Threaded pipeline for comparison
-3. CPU stress injection → Degraded Mode activates → recovery
-4. Replay server killed → watchdog reset fires
-5. Final stats snapshot
+1. Async pipeline under 10× burst load.
+2. Threaded pipeline for comparison.
+3. CPU stress injection → Degraded Mode trips → recovery.
+4. Replay server killed → watchdog reset fires.
+5. Final stats snapshot.
 
-### Windows (PowerShell):
+```bash
+# Linux / macOS / WSL:
+chmod +x scripts/demo.sh
+./scripts/demo.sh
 
-```powershell
-cd "$env:USERPROFILE\Desktop\UNI\Real Time System"
+# Windows PowerShell:
 .\scripts\demo.ps1
 ```
 
-If you already built the binary and want to skip the compile step:
-
-```powershell
-.\scripts\demo.ps1 -SkipBuild
-```
-
-### WSL / Linux:
-
-```bash
-cd "/mnt/c/Users/tahaf/Desktop/UNI/Real Time System"
-chmod +x scripts/demo.sh
-./scripts/demo.sh
-# or skip build:
-./scripts/demo.sh --skip-build
-```
+Add `--skip-build` (`-SkipBuild` on PowerShell) if you have already built the workspace.
 
 ---
 
-## Workspace Layout
+## Mapping to the Assignment Brief
 
-```
-Cargo.toml                     # workspace root — lists all 6 member crates
-rust-toolchain.toml            # pins Rust stable channel
-.cargo/config.toml             # release profile: lto=thin, opt-level=3
-scripts/
-  demo.ps1                     # Windows demo script
-  demo.sh                      # WSL/Linux demo script
-  plot_latency.py              # Python: tail-latency CDF plot
-  plot_shootout.py             # Python: sync-shootout throughput plot
-  analyse_bench.py             # Python: NDJSON log → CSV post-processor
-crates/
-  rts-core/                    # shared types, Cow parser, DropOldestRing,
-  │                            #   HdrHistogram metrics, FailSafeController
-  rts-async/                   # Tokio: ingest, biased-select scheduler,
-  │                            #   leaderboard actor, pipeline orchestrator
-  rts-threaded/                # std::thread: blocking ingest, BinaryHeap
-  │                            #   priority queue, worker pool
-  rts-bench/                   # Criterion harnesses
-  │  benches/sync_shootout.rs  #   5 primitives × 5 thread counts
-  │  benches/tail_latency.rs   #   async vs threaded drift comparison
-  rts-cli/                     # clap entry point — all subcommands live here
-  rts-replay/                  # axum SSE server for fixture replay
-fixtures/
-  recentchange-60s.ndjson      # 3 078 real Wikipedia events (pre-recorded)
-reports/
-  runs/                        # per-run NDJSON event logs
-  csv/                         # post-processed percentile CSVs
-  plots/                       # PNG figures
-  dhat/                        # heap profile JSON dumps
-docs/research-report/
-  report.md                    # full written report
-```
+| Brief requirement                                  | Where it lives                                          |
+| -------------------------------------------------- | ------------------------------------------------------- |
+| Dual pipeline (async + threaded)                   | `crates/rts-async/`, `crates/rts-threaded/`             |
+| Bounded channel + drop-oldest + overflow event     | `rts_core::channel::DropOldestRing`                     |
+| Zero-copy `serde` parsing with `Cow<'a, str>`      | `rts_core::event::Event<'a>`, `parse_one`               |
+| Bot-vs-human priority scheduling                   | `rts_core::priority::Priority`, biased `select!` / heap |
+| 2 ms micro-deadline + scheduling-drift metric      | `rts_core::metrics`, per-event drift histogram          |
+| Top-3 domain leaderboard (shared resource)         | leaderboard actor / shared map in each pipeline crate   |
+| Mutex / RwLock / Atomic synchronisation benchmark  | `crates/rts-bench/benches/sync_shootout.rs`             |
+| 10 s watchdog → network reset                      | `rts_core::watchdog`                                    |
+| Fail-Safe / Degraded Mode with hysteresis          | `rts_core::failsafe::FailSafeController`                |
+| Heap-allocation proof (zero-copy)                  | `dhat-heap` feature; `reports/dhat/`                    |
+| Tail-latency p50/p90/p99/p99.9 (async vs threaded) | `crates/rts-bench/benches/tail_latency.rs`              |
+| Research report (3000–4000 words)                  | `docs/research-report/report.md`                        |
+| Demonstration                                      | `scripts/demo.ps1`, `scripts/demo.sh`                   |
 
 ---
 
@@ -494,59 +360,53 @@ docs/research-report/
 
 ### `cargo: command not found`
 
-Rust is not on your PATH. Fix:
-- **Windows:** close and reopen PowerShell, or add `%USERPROFILE%\.cargo\bin` to PATH manually.
-- **WSL:** run `source "$HOME/.cargo/env"` then try again.
+Rust isn't on `PATH`.
 
-### `error[E0XXX]` compile errors
+- Linux/macOS/WSL: `source "$HOME/.cargo/env"`.
+- Windows: close and reopen the terminal, or add `%USERPROFILE%\.cargo\bin` to PATH.
 
-Run `cargo update` then `cargo build --workspace --release` again. If the error mentions a specific crate, check the error message — it usually says exactly which line is wrong.
+### Compile errors after pulling
+
+```bash
+cargo update
+cargo build --workspace --release
+```
 
 ### Port 8080 already in use
 
-```powershell
-# Windows — find and kill whatever is using 8080:
-netstat -ano | findstr :8080
-taskkill /PID <pid-from-above> /F
-
-# WSL:
+```bash
+# Linux / macOS / WSL:
 lsof -i :8080
 kill <pid>
 ```
 
-Or use a different port: add `--port 9090` to both the replay server and `--url http://127.0.0.1:9090/...` to the pipeline.
+```powershell
+# Windows:
+netstat -ano | findstr :8080
+taskkill /PID <pid> /F
+```
 
-### Pipeline exits immediately with `connection refused`
+Or pass `--port 9090` to both the replay server and the pipeline's `--url`.
 
-The replay server is not running. Start it in a **separate terminal** first (see [Option B](#option-b----local-replay-recommended----no-internet-needed)).
+### Pipeline exits with `connection refused`
 
-### Benchmark numbers look very slow (>10× expected)
+The replay server isn't running. Start it in a separate terminal first.
 
-- Are you using `--release`? Without it the binary is in debug mode.
-- Are you on Windows? Run in WSL for stable numbers.
-- Is antivirus scanning `target/`? Add the project folder to Windows Defender exclusions.
+### Benchmark numbers look unreasonably slow
+
+- Confirm `--release` is on the command line.
+- On Windows, run the benchmarks under WSL2 — the NT scheduler adds noticeable noise.
+- Add the project folder to your antivirus exclusion list (`target/` churns a lot).
 
 ### `dhat-heap.json` not produced
 
-Ensure you passed `--features dhat-heap` **and** the binary ran for at least 10 seconds. The profile is written on clean exit — don't kill with `Ctrl+C` or the file won't flush.
+You need both `--features dhat-heap` **and** a clean exit (let the duration finish; don't kill with `Ctrl+C`). The profile is flushed on drop.
 
 ### Python plots fail with `ModuleNotFoundError`
 
-```powershell
+```bash
 pip install matplotlib numpy hdrh
 ```
-
-On WSL use `pip3` if `pip` points to Python 2.
-
-### GitHub Actions CI showing 0/2 jobs
-
-Run locally to find the problem:
-```powershell
-cargo fmt --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --release
-```
-Fix whatever fails, commit, and push again.
 
 ---
 
