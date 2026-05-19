@@ -412,4 +412,4 @@ pip install matplotlib numpy hdrh
 
 ## License
 
-MIT OR Apache-2.0.
+
